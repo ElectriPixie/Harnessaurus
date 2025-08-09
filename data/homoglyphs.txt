@@ -1,0 +1,56 @@
+# Format: LatinChar  HomoglyphChar1 HomoglyphChar2 HomoglyphChar3 ...
+# Comments in parentheses explain origin, examples
+
+a а α ạ à á ä å ɑ 𝛂 𝛼  # Cyrillic а, Greek alpha, Latin a with diacritics, script a
+b в ɓ 𝛃 𝑏 𝔟           # Cyrillic ve, Latin b with hook, Greek beta variants
+c с ɕ ç ċ č          # Cyrillic es, IPA, Latin c with diacritics
+d ԁ ɗ 𝛿 ď đ           # Cyrillic de, Latin d with hook, Greek delta, Latin d with diacritics
+e е є ḗ è é ë ė      # Cyrillic ie, Cyrillic Ukrainian ie, Latin e with diacritics
+f ғ 𝒻 ƒ             # Cyrillic ghe with stroke, script f, Latin f with hook
+g ɡ ģ 𝛾 𝑔             # Latin script g, Latin g with cedilla, Greek gamma, italic g
+h һ ħ 𝒽              # Cyrillic shha, Latin h with stroke, script h
+i і ι ì í ï į 𝑖      # Cyrillic i, Greek iota, Latin i with diacritics, italic i
+j ј ɉ 𝒿              # Cyrillic je, Latin j with stroke, script j
+k к ƙ 𝑘 𝓀            # Cyrillic ka, Latin k with hook, italic k, script k
+l ⅼ ł 𝓁 𝓵            # Roman numeral 50, l with stroke, script l, italic l
+m м ɱ 𝓂 𝑚            # Cyrillic em, Latin m with hook, script m, italic m
+n п ñ ņ ń 𝓃 𝓷          # Cyrillic pe, Latin n with tilde and diacritics, script n, italic n
+o о ο ɵ ò ó ö ō 𝑜      # Cyrillic o, Greek omicron, Latin barred o, diacritics, italic o
+p р þ 𝓅 𝑝             # Cyrillic er, Latin thorn, script p, italic p
+q 𝗾 ɋ                 # Mathematical bold q, Latin q with hook
+r я ŗ ř 𝓇 𝓻           # Cyrillic ya, Latin r with diacritics, script r, italic r
+s ѕ ś š ș ş           # Cyrillic es, Latin s with diacritics, Latin s with comma below
+t т ŧ ț 𝓉 𝓽           # Cyrillic te, Latin t with stroke, Latin t with comma below, script t
+u ц ù ú ü ū 𝓊 𝓾       # Cyrillic tse, Latin u with diacritics, script u, italic u
+v ѵ ṿ 𝓋 𝓿            # Cyrillic ve, Latin v with dot below, script v, italic v
+w 𝗐 ŵ 𝓌 𝓌             # Mathematical bold w, Latin w with circumflex, script w
+x х ẋ 𝓍               # Cyrillic ha, Latin x with dot above, script x
+y у ý ŷ 𝓎 𝓎           # Cyrillic u, Latin y with acute, Latin y with circumflex, script y
+z 𝗓 ź ž 𝓏 𝔃           # Mathematical bold z, Latin z with diacritics, script z, fraktur z
+
+A А Α Ȧ Ḁ 𝛢 𝑨         # Cyrillic A, Greek Alpha, Latin A with dot above, Latin A with ring above, bold Greek A, italic A
+B В Β 𝔅 𝑩             # Cyrillic Ve, Greek Beta, Fraktur B, italic B
+C С Ϲ 𝓒 𝑪             # Cyrillic Es, Greek San, Script C, italic C
+D Ԁ Δ Ḋ 𝔇 𝑫           # Cyrillic De, Greek Delta, Latin D with dot above, Fraktur D, italic D
+E Е Ε Ḗ 𝔈 𝑬           # Cyrillic Ie, Greek Epsilon, Latin E with acute, Fraktur E, italic E
+F Ғ Φ 𝔉 𝑭             # Cyrillic Ghe with stroke, Greek Phi, Fraktur F, italic F
+G ɢ Γ Ǵ 𝔊 𝑮           # Latin capital script g, Greek Gamma, Latin G with acute, Fraktur G, italic G
+H Н Η Ḧ 𝔋 𝑯           # Cyrillic En, Greek Eta, Latin H with diaeresis, Fraktur H, italic H
+I І Ι Ḭ 𝕀 𝑰           # Cyrillic I, Greek Iota, Latin I with diaeresis, Double-struck I, italic I
+J Ј Ɉ 𝔍 𝑱             # Cyrillic Je, Latin J with stroke, Fraktur J, italic J
+K К Κ 𝔎 𝑲             # Cyrillic Ka, Greek Kappa, Fraktur K, italic K
+L Ꮮ Λ Ŀ 𝔏 𝑳           # Cherokee L, Greek Lambda, Latin L with middle dot, Fraktur L, italic L
+M М Μ Ṁ 𝔐 𝑴           # Cyrillic Em, Greek Mu, Latin M with dot above, Fraktur M, italic M
+N Ν Ν Ń 𝔑 𝑵           # Greek Nu repeated, Latin N with acute, Fraktur N, italic N
+O О Ο Ȯ Ṍ 𝕆 𝑶           # Cyrillic O, Greek Omicron, Latin O with dot above, Latin O with tilde below, Double-struck O, italic O
+P Р Ρ Ṗ 𝔓 𝑷           # Cyrillic Er, Greek Rho, Latin P with dot above, Fraktur P, italic P
+Q 𝑸 𝒬                   # Mathematical bold Q, script Q
+R Я Ρ Ř 𝔕 𝑹           # Cyrillic Ya, Greek Rho, Latin R with caron, Fraktur R, italic R
+S Ѕ Σ Ś 𝔖 𝑺           # Cyrillic Es, Greek Sigma, Latin S with acute, Fraktur S, italic S
+T Т Τ Ṫ 𝔗 𝑻           # Cyrillic Te, Greek Tau, Latin T with dot above, Fraktur T, italic T
+U Ц Υ Ǔ 𝔘 𝑼           # Cyrillic Tse, Greek Upsilon, Latin U with caron, Fraktur U, italic U
+V Ѵ 𝕍 Ṽ 𝔙 𝑽           # Cyrillic Ve, Double-struck V, Latin V with tilde, Fraktur V, italic V
+W 𝗪 𝕎 Ẅ 𝔚 𝑾           # Mathematical bold W, Double-struck W, Latin W with diaeresis, Fraktur W, italic W
+X Х Χ Ẍ 𝔛 𝑿           # Cyrillic Ha, Greek Chi, Latin X with diaeresis, Fraktur X, italic X
+Y Ү Υ Ẏ 𝔜 𝒀           # Cyrillic U, Greek Upsilon, Latin Y with diaeresis, Fraktur Y, italic Y
+Z 𝗭 Ζ Ẑ 𝔃 𝒁           # Mathematical bold Z, Greek Zeta, Latin Z with circumflex, Fraktur z, script Z
