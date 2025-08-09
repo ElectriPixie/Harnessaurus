@@ -104,8 +104,14 @@ def main():
 
     report_dir = 'reports'
     os.makedirs(report_dir, exist_ok=True)
-    aggregator.save_csv(os.path.join(report_dir, 'redteam_results.csv'))
-    aggregator.save_json(os.path.join(report_dir, 'redteam_results.json'))
+    # Get current datetime string for filename, e.g., '2025-08-09_15-30-00'
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+    csv_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.csv')
+    json_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.json')
+
+    aggregator.save_csv(csv_filename)
+    aggregator.save_json(json_filename)
 
     print("\n=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))

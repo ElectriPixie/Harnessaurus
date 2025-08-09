@@ -11,7 +11,8 @@ class JsonLogger(PluginBase):
     def __init__(self, log_dir='logs'):
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
-        self.log_file = os.path.join(self.log_dir, f"redteam_{datetime.date.today()}.jsonl")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        self.log_file = os.path.join(self.log_dir, f"redteam_{timestamp}.jsonl")
 
     def on_log(self, record: dict) -> None:
         with self._lock:
