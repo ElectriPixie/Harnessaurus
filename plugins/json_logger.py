@@ -3,15 +3,16 @@ from plugin_base import PluginBase
 import threading
 import json
 import os
-import datetime
 
 class JsonLogger(PluginBase):
     _lock = threading.Lock()
 
-    def __init__(self, log_dir='logs'):
+    def __init__(self, log_dir='logs', timestamp=None):
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        if timestamp is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         self.log_file = os.path.join(self.log_dir, f"redteam_{timestamp}.jsonl")
 
     def on_log(self, record: dict) -> None:
