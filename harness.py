@@ -1,4 +1,3 @@
-# harness.py
 import json
 import difflib
 import os
@@ -11,6 +10,7 @@ from plugin_base import PluginBase
 from result_aggregator import ResultAggregator
 
 def diff_texts(text1: str, text2: str) -> str:
+    """Return unified diff string comparing two texts line by line."""
     d = difflib.unified_diff(
         text1.splitlines(keepends=True),
         text2.splitlines(keepends=True),
@@ -33,10 +33,10 @@ class GPTModel:
         self.model.eval()
 
     def infer_batch(self, prompts: list[str], max_new_tokens: int = 100) -> list[str]:
-        # Move inputs to the same device as the first model parameter (handles multi-GPU)
+        # Move inputs to device of model parameters (handles multi-GPU setup)
         device = next(self.model.parameters()).device
-
         inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(device)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -47,14 +47,24 @@ class GPTModel:
         decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         return decoded
 
-def batchify(lst, batch_size):
+def batchify(lst: list, batch_size: int):
+    """Yield successive batches from a list."""
     for i in range(0, len(lst), batch_size):
         yield lst[i:i + batch_size]
 
-def run_batch_test(prompts_batch: list[str], model: GPTModel, plugins: list[PluginBase], aggregator: ResultAggregator):
-    # Compose PluginManager inline
+def run_batch_test(
+    prompts_batch: list[str],
+    model: GPTModel,
+    plugins: list[PluginBase],
+    aggregator: ResultAggregator
+) -> list[dict]:
+    """
+    Run inference and plugin analysis on batches of prompts.
+    Returns list of result records.
+    """
+    # Inline PluginManager to coordinate plugins
     class PluginManager:
-        def __init__(self, plugins):
+        def __init__(self, plugins: list[PluginBase]):
             self.plugins = plugins
 
         def process_prompt(self, prompt: str) -> str:
@@ -68,14 +78,16 @@ def run_batch_test(prompts_batch: list[str], model: GPTModel, plugins: list[Plug
                 results[type(plugin).__name__] = plugin.process_output(prompt, output)
             return results
 
-        def process_batch_output(self, prompts, outputs) -> dict:
+        def process_batch_output(self, prompts: list[str], outputs: list[str]) -> dict:
             results = {}
             for plugin in self.plugins:
                 if hasattr(plugin, 'process_batch'):
                     batch_results = plugin.process_batch(prompts, outputs)
                     results[type(plugin).__name__] = batch_results
                 else:
-                    results[type(plugin).__name__] = [plugin.process_output(p, o) for p, o in zip(prompts, outputs)]
+                    results[type(plugin).__name__] = [
+                        plugin.process_output(p, o) for p, o in zip(prompts, outputs)
+                    ]
             return results
 
         def process_log(self, record: dict) -> None:
@@ -90,7 +102,7 @@ def run_batch_test(prompts_batch: list[str], model: GPTModel, plugins: list[Plug
     clean_outputs = model.infer_batch(clean_prompts)
     mutated_outputs = model.infer_batch(mutated_prompts)
 
-    # Batch postprocessing for plugins that support it
+    # Plugin batch postprocessing
     analysis_clean = pm.process_batch_output(clean_prompts, clean_outputs)
     analysis_mutated = pm.process_batch_output(mutated_prompts, mutated_outputs)
 
