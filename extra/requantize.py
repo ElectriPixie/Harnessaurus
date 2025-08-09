@@ -1,23 +1,32 @@
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import torch
 import argparse
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def main():
-    parser = argparse.ArgumentParser(description="Load and save 4-bit quantized model")
-    parser.add_argument('--model_name', required=True, help='Model name or local path')
-    parser.add_argument('--save_dir', required=True, help='Directory to save the quantized model')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name", required=True)
+    parser.add_argument("--save_dir", required=True)
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    quant_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
+        quantization_config=quant_config,
         device_map="auto",
-        load_in_4bit=True
+        trust_remote_code=True,
     )
 
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+
+    print("Saving quantized model...")
     model.save_pretrained(args.save_dir)
     tokenizer.save_pretrained(args.save_dir)
-    print(f"Quantized model and tokenizer saved to: {args.save_dir}")
 
 if __name__ == "__main__":
     main()
