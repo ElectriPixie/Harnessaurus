@@ -22,18 +22,21 @@ def diff_texts(text1: str, text2: str) -> str:
 
 class GPTModel:
     def __init__(self, model_name_or_path: str):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Loading model {model_name_or_path} on {self.device}")
+        print(f"Loading model {model_name_or_path} with device_map='auto'")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path,
             torch_dtype=torch.float16,
+            device_map="auto",
             low_cpu_mem_usage=True,
-        ).to(self.device)
+        )
         self.model.eval()
 
     def infer_batch(self, prompts: list[str], max_new_tokens: int = 100) -> list[str]:
-        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        # Move inputs to the same device as the first model parameter (handles multi-GPU)
+        device = next(self.model.parameters()).device
+
+        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(device)
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
