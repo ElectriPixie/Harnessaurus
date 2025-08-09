@@ -3,6 +3,10 @@ Harnessaurus is a modular, GPU-optimized local test harness for red-teaming open
 
 ---
 
+## This is a pre-release version, I can't guarantee it actually works yet, I'm just laying the foundations right now and I'm working through getting it all running on my hardware to do a first version release
+
+---
+
 ## Features
 
 - Prompt mutation plugins: inject zero-width characters, homoglyph substitutions, and other evasive techniques to test model robustness.  
