@@ -1,13 +1,10 @@
-import json
 import difflib
-import os
-import concurrent.futures
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from llama_cpp import Llama
 
 from plugin_loader import load_plugin
 from plugin_base import PluginBase
 from result_aggregator import ResultAggregator
+
 
 def diff_texts(text1: str, text2: str) -> str:
     """Return unified diff string comparing two texts line by line."""
@@ -20,37 +17,27 @@ def diff_texts(text1: str, text2: str) -> str:
     )
     return ''.join(d)
 
+
 class GPTModel:
-    def __init__(self, model_name_or_path: str):
-        print(f"Loading model {model_name_or_path} with device_map='auto'")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-        )
-        self.model.eval()
+    def __init__(self, model_path: str):
+        print(f"Loading llama.cpp model from {model_path}")
+        self.llm = Llama(model_path=model_path)
 
     def infer_batch(self, prompts: list[str], max_new_tokens: int = 100) -> list[str]:
-        # Move inputs to device of model parameters (handles multi-GPU setup)
-        device = next(self.model.parameters()).device
-        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(device)
+        results = []
+        for prompt in prompts:
+            output = self.llm(prompt, max_tokens=max_new_tokens, stop=None)
+            # Extract generated text from response
+            text = output['choices'][0]['text']
+            results.append(text)
+        return results
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-        decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        return decoded
 
 def batchify(lst: list, batch_size: int):
     """Yield successive batches from a list."""
     for i in range(0, len(lst), batch_size):
         yield lst[i:i + batch_size]
+
 
 def run_batch_test(
     prompts_batch: list[str],
@@ -62,7 +49,7 @@ def run_batch_test(
     Run inference and plugin analysis on batches of prompts.
     Returns list of result records.
     """
-    # Inline PluginManager to coordinate plugins
+
     class PluginManager:
         def __init__(self, plugins: list[PluginBase]):
             self.plugins = plugins
@@ -102,7 +89,6 @@ def run_batch_test(
     clean_outputs = model.infer_batch(clean_prompts)
     mutated_outputs = model.infer_batch(mutated_prompts)
 
-    # Plugin batch postprocessing
     analysis_clean = pm.process_batch_output(clean_prompts, clean_outputs)
     analysis_mutated = pm.process_batch_output(mutated_prompts, mutated_outputs)
 
