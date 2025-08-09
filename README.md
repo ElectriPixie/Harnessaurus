@@ -53,12 +53,15 @@ I can't guarantee it actually works yet, I'm just laying the foundations right n
 git clone https://github.com/yourusername/harnessaurus.git
 cd harnessaurus
 
-# (Optional) Create and activate a Python virtual environment
-python3 -m venv venv
-source venv/bin/activate    # Linux/macOS
-venv\Scripts\activate       # Windows
+# Create a virtual environment inside venv/Harnessaurus-venv
+python3 -m venv venv/Harnessaurus-venv
 
-# Install dependencies (if any)
+# Activate the virtual environment
+source venv/Harnessaurus-venv/bin/activate    # Linux/macOS
+# or
+venv\Harnessaurus-venv\Scripts\activate       # Windows
+
+# Install dependencies inside the virtual environment
 pip install -r requirements.txt
 ```
 
