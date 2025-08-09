@@ -1,0 +1,23 @@
+# Original control chars (directionality and isolate controls)
+\u202A
+\u202B
+\u202C
+\u202D
+\u202E
+\u2066
+\u2067
+\u2068
+\u2069
+
+# Additional control chars for extended detection
+\u200E
+\u200F
+\u061C
+\u034F
+\u180E
+\u206A
+\u206B
+\u206C
+\u206D
+\u206E
+\u206F

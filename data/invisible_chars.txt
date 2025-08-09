@@ -1,0 +1,12 @@
+# Invisible Unicode characters used for injection:
+# Format: Unicode escape sequence, comments after #
+
+\u200b  # ZERO WIDTH SPACE
+\u200c  # ZERO WIDTH NON-JOINER
+\u200d  # ZERO WIDTH JOINER
+\ufeff  # ZERO WIDTH NO-BREAK SPACE (BOM)
+\u200e  # LEFT-TO-RIGHT MARK
+\u200f  # RIGHT-TO-LEFT MARK
+\u2060  # WORD JOINER
+\u2063  # INVISIBLE SEPARATOR
+\u2064  # INVISIBLE PLUS

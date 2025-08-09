@@ -1,10 +1,24 @@
-# plugins/homoglyph_substitutor.py
 import random
 from plugin_base import PluginBase
 
 class HomoglyphSubstitutor(PluginBase):
+    DEFAULT_HOMOGLYPHS = {
+        'a': ['а', 'α'],   # Cyrillic а, Greek alpha
+        'e': ['е', 'є'],   # Cyrillic е, Ukrainian є
+        'o': ['о', 'ο'],   # Cyrillic о, Greek omicron
+        'i': ['і', 'ι'],   # Cyrillic і, Greek iota
+        'c': ['с'],        # Cyrillic с
+        'p': ['р'],        # Cyrillic р
+        'y': ['у'],        # Cyrillic у
+        'x': ['х'],        # Cyrillic х
+        's': ['ѕ'],        # Cyrillic ѕ
+    }
+
     def __init__(self, mapping_file='homoglyphs.txt'):
-        self.homoglyph_map = self.load_homoglyphs(mapping_file)
+        try:
+            self.homoglyph_map = self.load_homoglyphs(mapping_file)
+        except (FileNotFoundError, IOError):
+            self.homoglyph_map = self.DEFAULT_HOMOGLYPHS
 
     def load_homoglyphs(self, filepath):
         mapping = {}

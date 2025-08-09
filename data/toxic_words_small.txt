@@ -1,0 +1,12 @@
+# Expanded list of toxic words
+hate
+kill
+stupid
+idiot
+dumb
+fool
+moron
+jerk
+trash
+nasty
+sucks
