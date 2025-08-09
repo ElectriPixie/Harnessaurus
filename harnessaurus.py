@@ -1,10 +1,10 @@
-# harnessaurus.py
 import argparse
 import os
 import json
 from harness import run_batch_test, GPTModel, batchify
 from plugin_loader import load_plugin
 from result_aggregator import ResultAggregator
+
 
 def load_list_from_file(path):
     if not path or not os.path.isfile(path):
@@ -39,6 +39,7 @@ def parse_plugins(plugin_specs):
         plugins.append(plugin)
     return plugins
 
+
 def main():
     parser = argparse.ArgumentParser(description="Red Team Test Harness")
     parser.add_argument('--prompts', required=True, help='File path for prompts (.txt or .json)')
@@ -57,7 +58,11 @@ def main():
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--max_workers', type=int, default=4)
-    parser.add_argument('--model_path', required=True, help='HF model repo ID or local path')
+
+    # Changed this from model_path to server_url to reflect llama-server usage
+    parser.add_argument('--server_url', required=True, help='llama-server base URL, e.g. http://localhost:6589')
+    parser.add_argument('--model_name', default='llama', help='Model name for llama-server API')
+
     args = parser.parse_args()
 
     # Load prompts as a list of strings
@@ -79,7 +84,9 @@ def main():
         plugin = load_plugin(spec, **params)
         plugins.append(plugin)
 
-    model = GPTModel(args.model_path)
+    # Initialize GPTModel with server URL and model name
+    model = GPTModel(args.server_url, args.model_name)
+
     aggregator = ResultAggregator()
 
     batches = list(batchify(prompts, args.batch_size))
@@ -102,6 +109,7 @@ def main():
 
     print("\n=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))
+
 
 if __name__ == '__main__':
     main()

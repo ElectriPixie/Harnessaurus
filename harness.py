@@ -1,5 +1,6 @@
 import difflib
-from llama_cpp import Llama
+import requests
+from typing import List, Dict, Optional
 
 from plugin_loader import load_plugin
 from plugin_base import PluginBase
@@ -19,68 +20,98 @@ def diff_texts(text1: str, text2: str) -> str:
 
 
 class GPTModel:
-    def __init__(self, model_path: str):
-        print(f"Loading llama.cpp model from {model_path}")
-        self.llm = Llama(model_path=model_path)
+    def __init__(self, server_url: str, model_name: str = "llama"):
+        """
+        Initialize with llama-server URL and model name.
+        Example: server_url="http://localhost:6589"
+        """
+        print(f"Using llama-server at {server_url} for model '{model_name}'")
+        self.server_url = server_url.rstrip('/')
+        self.model_name = model_name
 
-    def infer_batch(self, prompts: list[str], max_new_tokens: int = 100) -> list[str]:
+    def infer_batch(self, prompts: List[str], max_new_tokens: int = 100) -> List[str]:
+        """
+        Sends batch prompts to llama-server and returns list of generated texts.
+        """
         results = []
+        url = f"{self.server_url}/v1/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json"
+        }
+
         for prompt in prompts:
-            output = self.llm(prompt, max_tokens=max_new_tokens, stop=None)
-            # Extract generated text from response
-            text = output['choices'][0]['text']
-            results.append(text)
+            payload = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_new_tokens,
+                "temperature": 0,
+                # You can add stop tokens if supported by your server
+                # "stop": ["<|return|>", "\n\n"],
+            }
+
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                text = data["choices"][0]["message"]["content"]
+                results.append(text)
+            except Exception as e:
+                print(f"Error generating text for prompt:\n{prompt}\nException: {e}")
+                results.append("")
+
         return results
 
 
-def batchify(lst: list, batch_size: int):
+
+def batchify(lst: List[str], batch_size: int):
     """Yield successive batches from a list."""
     for i in range(0, len(lst), batch_size):
         yield lst[i:i + batch_size]
 
 
+class PluginManager:
+    def __init__(self, plugins: List[PluginBase]):
+        self.plugins = plugins
+
+    def process_prompt(self, prompt: str) -> str:
+        for plugin in self.plugins:
+            prompt = plugin.process_prompt(prompt)
+        return prompt
+
+    def process_output(self, prompt: str, output: str) -> Dict[str, Optional[object]]:
+        results = {}
+        for plugin in self.plugins:
+            results[type(plugin).__name__] = plugin.process_output(prompt, output)
+        return results
+
+    def process_batch_output(self, prompts: List[str], outputs: List[str]) -> Dict[str, List[Optional[object]]]:
+        results = {}
+        for plugin in self.plugins:
+            if hasattr(plugin, 'process_batch'):
+                batch_results = plugin.process_batch(prompts, outputs)
+                results[type(plugin).__name__] = batch_results
+            else:
+                results[type(plugin).__name__] = [
+                    plugin.process_output(p, o) for p, o in zip(prompts, outputs)
+                ]
+        return results
+
+    def process_log(self, record: dict) -> None:
+        for plugin in self.plugins:
+            plugin.on_log(record)
+
+
 def run_batch_test(
-    prompts_batch: list[str],
+    prompts_batch: List[str],
     model: GPTModel,
-    plugins: list[PluginBase],
+    plugins: List[PluginBase],
     aggregator: ResultAggregator
-) -> list[dict]:
+) -> List[dict]:
     """
     Run inference and plugin analysis on batches of prompts.
     Returns list of result records.
     """
-
-    class PluginManager:
-        def __init__(self, plugins: list[PluginBase]):
-            self.plugins = plugins
-
-        def process_prompt(self, prompt: str) -> str:
-            for plugin in self.plugins:
-                prompt = plugin.process_prompt(prompt)
-            return prompt
-
-        def process_output(self, prompt: str, output: str) -> dict:
-            results = {}
-            for plugin in self.plugins:
-                results[type(plugin).__name__] = plugin.process_output(prompt, output)
-            return results
-
-        def process_batch_output(self, prompts: list[str], outputs: list[str]) -> dict:
-            results = {}
-            for plugin in self.plugins:
-                if hasattr(plugin, 'process_batch'):
-                    batch_results = plugin.process_batch(prompts, outputs)
-                    results[type(plugin).__name__] = batch_results
-                else:
-                    results[type(plugin).__name__] = [
-                        plugin.process_output(p, o) for p, o in zip(prompts, outputs)
-                    ]
-            return results
-
-        def process_log(self, record: dict) -> None:
-            for plugin in self.plugins:
-                plugin.on_log(record)
-
     pm = PluginManager(plugins)
 
     clean_prompts = prompts_batch
