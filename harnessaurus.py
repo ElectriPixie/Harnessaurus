@@ -1,4 +1,4 @@
-# main.py
+# harnessaurus.py
 import argparse
 import os
 import json

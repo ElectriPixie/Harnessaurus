@@ -1,49 +1,48 @@
 # Harnessaurus
+
 Harnessaurus is a modular, GPU-optimized local test harness for red-teaming open-source language models. It flexibly loads plugins to detect prompt injections, reward hacking, and hidden exploits — stomping through adversarial inputs with prehistoric strength and precision.
 
 ---
 
-## This is a pre-release version  
+## This is a pre-release version
+
 I can't guarantee it actually works yet, I'm just laying the foundations right now and working through getting it all running on my hardware for a first version release.
 
 ---
 
 ## Features
 
-- Prompt mutation plugins: inject zero-width characters, homoglyph substitutions, and other evasive techniques to test model robustness.  
-- Detection plugins: identify hidden injections, forbidden keywords, evasive or toxic output patterns.  
-- File-backed configuration: load custom lists for invisible characters, homoglyph mappings, forbidden keywords, and toxic words.  
-- Extensible plugin architecture: easily add new mutation or detection strategies.  
-- Large prompt corpus support for continuous integration and regression testing.
+* Prompt mutation plugins: inject zero-width characters, homoglyph substitutions, and other evasive techniques to test model robustness.
+* Detection plugins: identify hidden injections, forbidden keywords, evasive or toxic output patterns.
+* File-backed configuration: load custom lists for invisible characters, homoglyph mappings, forbidden keywords, and toxic words.
+* Extensible plugin architecture: easily add new mutation or detection strategies.
+* Large prompt corpus support for continuous integration and regression testing.
 
 ---
 
 ## Project Structure
 
 ```
-
-/project\_root
+/project_root
 ├── plugins/
-│   ├── homoglyph\_substitutor.py
-│   ├── zero\_width\_injector.py
-│   ├── hidden\_injection\_detector.py
-│   ├── forbidden\_keyword\_detector.py
-│   ├── advanced\_output\_analyzer.py
-│   └── plugin\_base.py
+│   ├── homoglyph_substitutor.py
+│   ├── zero_width_injector.py
+│   ├── hidden_injection_detector.py
+│   ├── forbidden_keyword_detector.py
+│   ├── advanced_output_analyzer.py
+│   └── plugin_base.py
 ├── data/
+│   ├── prompts.txt
 │   ├── homoglyphs.txt
-│   ├── invisible\_chars.txt
-│   ├── forbidden\_keywords.txt
-│   ├── toxic\_words.txt
-│   └── control\_chars.txt
-├── tests/
-│   └── test\_harness.py  # Optional, minimal example for plugin dev
-├── prompts/
-│   └── large\_prompt\_corpus.txt
-├── harness.py          # Main test harness script
+│   ├── invisible_chars.txt
+│   ├── forbidden_keywords.txt
+│   ├── toxic_words.txt
+│   └── control_chars.txt
+├── tests/   # (optional) plugin dev examples
+├── harness.py
+├── harnessaurus.py    # Main CLI entry point
 └── README.md
-
-````
+```
 
 ---
 
@@ -61,14 +60,14 @@ venv\Scripts\activate       # Windows
 
 # Install dependencies (if any)
 pip install -r requirements.txt
-````
+```
 
 ---
 
 ## Usage
 
 1. Prepare your prompt corpus
-    Place your test prompts in the `prompts/large_prompt_corpus.txt` file, one prompt per line.
+    Place your test prompts in the `data/prompts.txt` file, one prompt per line.
 
 2. Configure data files
     Adjust or add your custom data lists in the `data/` directory:
@@ -78,60 +77,14 @@ pip install -r requirements.txt
     - `toxic_words.txt`: words/phrases used for toxicity scoring
     - `control_chars.txt`: Unicode control characters to detect
 
-3. Run the main test harness
-    Run the main harness script `harness.py` which loads your model, applies plugins, and aggregates results.
-    Here’s a basic usage snippet inside `harness.py`:
+3. Run the test harness CLI
+    Run the main harness script with your model and options:
 
-```python
-from plugins.homoglyph_substitutor import HomoglyphSubstitutor
-from plugins.zero_width_injector import ZeroWidthInjector
-from plugins.hidden_injection_detector import HiddenPromptInjectionDetector
-from plugins.forbidden_keyword_detector import ForbiddenKeywordDetector
-from plugins.advanced_output_analyzer import AdvancedOutputAnalyzer
-from result_aggregator import ResultAggregator
-from model import GPTModel  # your model wrapper
-
-# Load prompts from file
-with open("prompts/large_prompt_corpus.txt", "r", encoding="utf-8") as f:
-    prompts = [line.strip() for line in f if line.strip()]
-
-# Instantiate plugins
-plugins = [
-    HomoglyphSubstitutor("data/homoglyphs.txt"),
-    ZeroWidthInjector("data/invisible_chars.txt"),
-    HiddenPromptInjectionDetector("data/homoglyphs.txt"),
-    ForbiddenKeywordDetector("data/forbidden_keywords.txt"),
-    AdvancedOutputAnalyzer("data/toxic_words.txt")
-]
-
-# Instantiate model and result aggregator
-model = GPTModel("gpt2")  # or your preferred model
-aggregator = ResultAggregator()
-
-# Run test batch
-from harness import run_batch_test
-results = run_batch_test(prompts, model, plugins, aggregator)
-
-# Output summary
-for record in results:
-    print(f"Original Prompt: {record['original_prompt']}")
-    print(f"Mutated Prompt: {record['mutated_prompt']}")
-    print(f"Clean Output: {record['clean_output']}")
-    print(f"Mutated Output: {record['mutated_output']}")
-    print(f"Output Diff:\n{record['output_diff']}")
-    print(f"Analysis Clean: {record['analysis_clean']}")
-    print(f"Analysis Mutated: {record['analysis_mutated']}")
-    print("-" * 60)
+```bash
+python harnessaurus.py --prompts data/prompts.txt --model_path gpt-oss-20b
 ```
 
-4. (Optional) Minimal plugin dev/testing
-    You can use `tests/test_harness.py` as a lightweight example to quickly test plugins without running the full model inference.
-
-5. Extend or customize
-    - Add new plugins to `plugins/` by inheriting from `PluginBase`
-    - Add your mutation or detection logic
-    - Modify `harness.py` to include your plugins or customize workflow
-    - Update data files to fit your environment or testing focus
+You can customize plugins, batch size, max workers, and more via command line arguments.
 
 ---
 
@@ -145,3 +98,14 @@ for record in results:
 | forbidden\_keyword\_detector.py | Detect forbidden keywords in output                          |
 | advanced\_output\_analyzer.py   | Detect evasive phrases and estimate toxicity                 |
 | plugin\_base.py                 | Base class for plugin inheritance                            |
+
+---
+
+## Extending Harnessaurus
+
+* Add new plugins by inheriting from `PluginBase` in the `plugins/` directory
+* Implement mutation or detection logic to suit your needs
+* Modify `harnessaurus.py` to include your plugins or adjust workflow
+* Update data files to fine-tune tests for your environment or focus
+
+---
