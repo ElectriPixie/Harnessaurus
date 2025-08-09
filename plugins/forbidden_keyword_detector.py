@@ -1,6 +1,6 @@
 from plugin_base import PluginBase
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Union, Dict
 
 class ForbiddenKeywordDetector(PluginBase):
     DEFAULT_KEYWORDS = [
@@ -25,9 +25,12 @@ class ForbiddenKeywordDetector(PluginBase):
         "malicious",
     ]
 
-    def __init__(self, keywords_file: str = None):
-        if keywords_file:
-            self.keywords = self.load_keywords(keywords_file)
+    def __init__(self, keywords: Union[str, List[str], None] = None):
+        if isinstance(keywords, str):
+            # Treat as file path
+            self.keywords = self.load_keywords(keywords)
+        elif isinstance(keywords, list):
+            self.keywords = set(kw.lower() for kw in keywords)
         else:
             self.keywords = set(self.DEFAULT_KEYWORDS)
 
