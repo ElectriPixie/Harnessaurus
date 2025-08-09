@@ -29,7 +29,7 @@ def parse_plugins(plugin_specs):
             kwargs = {}
             for pair in params_str.split(','):
                 if '=' in pair:
-                    k,v = pair.split('=',1)
+                    k, v = pair.split('=', 1)
                     kwargs[k.strip()] = v.strip()
                 else:
                     kwargs[pair.strip()] = True
@@ -60,14 +60,16 @@ def main():
     parser.add_argument('--model_path', required=True, help='HF model repo ID or local path')
     args = parser.parse_args()
 
+    # Load prompts as a list of strings
     prompts = load_list_from_file(args.prompts)
-    forbidden_keywords = load_list_from_file(args.forbidden_keywords)
-    evasive_phrases = load_list_from_file(args.evasive_phrases)
 
-    # Prepare plugin param overrides
+    # Pass file paths directly to plugins for internal loading
+    forbidden_keywords_file = args.forbidden_keywords
+    evasive_phrases_file = args.evasive_phrases
+
     plugin_param_map = {
-        'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': forbidden_keywords},
-        'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases': evasive_phrases},
+        'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords_file': forbidden_keywords_file},
+        'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': evasive_phrases_file},
     }
 
     plugins = []
