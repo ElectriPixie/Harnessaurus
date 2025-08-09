@@ -70,6 +70,7 @@ def main():
     plugin_param_map = {
         'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': forbidden_keywords_file},
         'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': evasive_phrases_file},
+        'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs.txt'},
     }
 
     plugins = []
