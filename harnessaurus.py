@@ -1,6 +1,7 @@
 import argparse
 import os
 import json
+from datetime import datetime
 from harness import run_batch_test, GPTModel, batchify
 from plugin_loader import load_plugin
 from result_aggregator import ResultAggregator
@@ -103,9 +104,10 @@ def main():
                 print(f"Error in batch: {e}")
 
     report_dir = 'reports'
+    print(f"Creating reports directory at: {report_dir}")
     os.makedirs(report_dir, exist_ok=True)
-    # Get current datetime string for filename, e.g., '2025-08-09_15-30-00'
-    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
     csv_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.csv')
     json_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.json')
@@ -115,7 +117,6 @@ def main():
 
     print("\n=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))
-
 
 if __name__ == '__main__':
     main()

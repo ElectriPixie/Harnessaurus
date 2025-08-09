@@ -4,4 +4,4 @@ models/
 ignore/
 reports/
 logs/
-harnesaurus.log
+*.log
