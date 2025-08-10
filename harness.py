@@ -4,9 +4,6 @@ import traceback
 import json
 import re
 from typing import List, Dict, Optional
-
-from transformers import GPT2Tokenizer
-
 from plugin_loader import load_plugin
 from plugin_base import PluginBase
 from result_aggregator import ResultAggregator
