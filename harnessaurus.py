@@ -37,6 +37,7 @@ def main():
                             'hidden_injection_detector.HiddenPromptInjectionDetector',
                             'json_logger.JsonLogger',
                             'refusal_detector.RefusalDetector',
+                            'reward_hacking_detector.RewardHackingDetector'
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--batch_size', type=int, default=8)
