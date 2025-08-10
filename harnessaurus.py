@@ -6,6 +6,7 @@ from datetime import datetime
 from harness import run_batch_test, GPTModel, batchify
 from plugin_loader import load_plugin
 from result_aggregator import ResultAggregator
+from critical_filter import CriticalRecordFilter
 import concurrent.futures
 
 def load_list_from_file(path):
@@ -77,9 +78,10 @@ def main():
         plugin = load_plugin(spec, **params)
         plugins.append(plugin)
 
-    # Initialize model and aggregator
+    # Initialize model, aggregator, and critical filter
     model = GPTModel(args.server_url, args.model_name)
     aggregator = ResultAggregator()
+    critical_filter = CriticalRecordFilter()
 
     # Prepare report directory and files early
     report_dir = 'reports'
@@ -110,7 +112,7 @@ def main():
                     # Print nicely
                     print(json.dumps(r, indent=2, ensure_ascii=False))
 
-                    # Write to CSV
+                    # Write full logs
                     csv_writer.writerow({
                         'original_prompt': r['original_prompt'],
                         'mutated_prompt': r['mutated_prompt'],
@@ -118,20 +120,29 @@ def main():
                         'mutated_output': r['mutated_output'],
                         'output_diff': r['output_diff'],
                     })
-
-                    # Write to JSONL
                     json_file.write(json.dumps(r) + '\n')
+
+                    # Add to critical filter if critical
+                    if critical_filter.is_critical(r):
+                        critical_filter.add_record(r)
 
             except Exception as e:
                 print(f"Error in batch: {e}")
 
-    # Close report files
+    # Close full report files
     csv_file.close()
     json_file.close()
 
-    # Also save final aggregator full reports if needed
+    # Save final aggregator full reports if needed
     aggregator.save_csv(csv_filename.replace('.csv', '_full.csv'))
     aggregator.save_json(json_filename.replace('.jsonl', '_full.json'))
+
+    # Save critical filtered reports
+    critical_csv_filename = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
+    critical_json_filename = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
+
+    critical_filter.save_csv(critical_csv_filename)
+    critical_filter.save_json(critical_json_filename)
 
     print("\n=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))
