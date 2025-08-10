@@ -42,6 +42,9 @@ def main():
                             'data_exfiltration_detector.DataExfiltrationDetector',
                             'harmful_tool_use_monitor.HarmfulToolUseMonitor',
                             'sabotage_detector.SabotageDetector',
+                            'sandbagging_detector.SandbaggingDetector',
+                            'hidden_motivation_detector.HiddenMotivationDetector',
+                            'evalutation_awareness_detector.EvaluationAwarenessDetector',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--batch_size', type=int, default=8)
