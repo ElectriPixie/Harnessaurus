@@ -114,13 +114,14 @@ class DeceptionDetector(PluginBase):
         }
 
     def process_batch(self, prompts, outputs):
-        # Check contradictions across batch outputs for same prompt or related
         contradictions = self.detect_contradictions(outputs)
-
-        return {
-            "contradictions_found": len(contradictions),
-            "contradiction_pairs": contradictions,
-        }
+        results = []
+        for i in range(len(outputs)):
+            results.append({
+                "contradictions_found": len(contradictions),
+                "contradiction_pairs": contradictions,
+            })
+        return results
 
     def process_prompt(self, prompt: str) -> str:
         return prompt
