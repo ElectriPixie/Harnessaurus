@@ -54,45 +54,85 @@ def split_into_channels(text: str) -> Dict[str, str]:
 
 class GPTModel:
     def __init__(self, server_url: str, model_name: str = "llama"):
-        """
-        Initialize with llama-server URL and model name.
-        Example: server_url="http://localhost:6589"
-        """
         print(f"Using llama-server at {server_url} for model '{model_name}'")
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
 
-    def infer_batch(self, prompts: List[str], max_new_tokens: int = 256) -> List[str]:
+    def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
         """
-        Sends batch prompts to llama-server and returns list of generated texts.
+        Generate text iteratively by feeding back output until
+        the model finishes or max_iterations is reached.
         """
-        results = []
         url = f"{self.server_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
 
-        headers = {
-            "Content-Type": "application/json"
-        }
-
-        for prompt in prompts:
+        current_prompt = prompt
+        full_output = ""
+        for i in range(max_iterations):
             payload = {
                 "model": self.model_name,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_new_tokens,
+                "messages": [{"role": "user", "content": current_prompt}],
+                "max_tokens": max_chunk_tokens,
                 "temperature": 0,
-                # You can add stop tokens if supported by your server
-                # "stop": ["<|return|>", "\n\n"],
             }
 
             try:
                 response = requests.post(url, headers=headers, json=payload, timeout=30)
-                print("Raw response text:", response.text)
                 response.raise_for_status()
                 data = response.json()
-                text = data["choices"][0]["message"]["content"]
-                results.append(text)
+                chunk = data["choices"][0]["message"]["content"]
+
+                print(f"[Chunk {i+1}] Generated chunk length: {len(chunk)}")
+                full_output += chunk
+
+                finish_reason = data["choices"][0].get("finish_reason", "")
+                if finish_reason != "length":
+                    # generation stopped naturally (not truncated)
+                    print(f"Generation finished at chunk {i+1} with reason: {finish_reason}")
+                    break
+
+                # Append the new chunk to prompt for next iteration to continue from there
+                current_prompt += chunk
             except Exception as e:
-                print(f"Error generating text for prompt:\n{prompt}\nException: {e}")
-                results.append("")
+                print(f"Error during iterative generation at chunk {i+1}: {e}")
+                break
+
+        print("Raw full_output: ", full_output)
+
+        return full_output
+
+    def infer_batch(self, prompts: List[str], max_new_tokens: int = 256, iterative=False, max_iterations=10) -> List[str]:
+        """
+        Send batch prompts to llama-server and return generated texts.
+        If iterative=True, perform chunked iterative generation per prompt.
+        """
+        results = []
+        if iterative:
+            for prompt in prompts:
+                print(f"Starting iterative generation for prompt (len={len(prompt)}): {prompt[:50]!r}...")
+                output = self.infer_iterative(prompt, max_chunk_tokens=max_new_tokens, max_iterations=max_iterations)
+                results.append(output)
+        else:
+            url = f"{self.server_url}/v1/chat/completions"
+            headers = {"Content-Type": "application/json"}
+
+            for prompt in prompts:
+                payload = {
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_new_tokens,
+                    "temperature": 0,
+                }
+
+                try:
+                    response = requests.post(url, headers=headers, json=payload, timeout=30)
+                    response.raise_for_status()
+                    data = response.json()
+                    text = data["choices"][0]["message"]["content"]
+                    results.append(text)
+                except Exception as e:
+                    print(f"Error generating text for prompt:\n{prompt}\nException: {e}")
+                    results.append("")
 
         return results
 
@@ -117,7 +157,6 @@ class PluginManager:
     def process_output(self, prompt: str, output: str, plugin_name: str) -> Optional[object]:
         debug_print(f"[DEBUG] process_output called for plugin '{plugin_name}'")
 
-        # Log the raw output length and first 500 chars for inspection
         debug_print(f"[DEBUG] Raw output length: {len(output)}")
         debug_print(f"[DEBUG] Raw output preview (first 500 chars):\n{output[:500]!r}")
 
@@ -192,8 +231,9 @@ def run_batch_test(
     clean_prompts = prompts_batch
     mutated_prompts = [pm.process_prompt(p) for p in clean_prompts]
 
-    clean_outputs = model.infer_batch(clean_prompts)
-    mutated_outputs = model.infer_batch(mutated_prompts)
+    # Use iterative generation to get full output instead of truncated 256-token output
+    clean_outputs = model.infer_batch(clean_prompts, max_new_tokens=256, iterative=True, max_iterations=10)
+    mutated_outputs = model.infer_batch(mutated_prompts, max_new_tokens=256, iterative=True, max_iterations=10)
 
     analysis_clean = pm.process_batch_output(clean_prompts, clean_outputs)
     analysis_mutated = pm.process_batch_output(mutated_prompts, mutated_outputs)
