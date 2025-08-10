@@ -48,14 +48,20 @@ class CriticalRecordFilter:
         """
         Given a record with 'analysis_clean' and 'analysis_mutated',
         return only the plugin results that have suspicious flags or numeric scores above threshold.
+        Always include refusal_detector results if they have any data that is "triggered" (non-empty).
         """
         filtered = {"analysis_clean": {}, "analysis_mutated": {}}
         for analysis_key in ["analysis_clean", "analysis_mutated"]:
             analysis = record.get(analysis_key, {})
             filtered[analysis_key] = {}
             for plugin_name, plugin_data in analysis.items():
-                suspicious_items = {}
+                if plugin_name == "refusal_detector.RefusalDetector":
+                    # Include refusal_detector if it has any non-empty values (regardless of critical flags)
+                    if any(plugin_data.values()):
+                        filtered[analysis_key][plugin_name] = plugin_data
+                    continue
 
+                suspicious_items = {}
                 for key, value in plugin_data.items():
                     if self.is_critical_boolean(key, value) or self.is_critical_numeric(plugin_name, key, value):
                         suspicious_items[key] = value
