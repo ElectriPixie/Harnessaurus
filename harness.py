@@ -138,8 +138,6 @@ def run_batch_test(
                 'mutated_output': mutated_outputs[i],
                 'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
                 'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
-#                'refusal_clean': refusal_clean,
-#                'refusal_mutated': refusal_mutated,
                 'output_diff': diff,
             }
 
