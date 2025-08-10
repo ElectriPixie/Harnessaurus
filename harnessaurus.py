@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import csv
+import time
 from datetime import datetime
 from harness import run_batch_test, GPTModel, batchify
 from plugin_loader import load_plugin
@@ -102,6 +103,9 @@ def main():
     # Batch prompts
     batches = list(batchify(prompts, args.batch_size))
 
+    # Start timing before batch processing
+    start_time = time.perf_counter()
+
     # Run batches in ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = [executor.submit(run_batch_test, batch, model, plugins, aggregator) for batch in batches]
@@ -129,6 +133,11 @@ def main():
             except Exception as e:
                 print(f"Error in batch: {e}")
 
+    # Stop timing after batch processing
+    end_time = time.perf_counter()
+    elapsed = end_time - start_time
+    print(f"\nTotal runtime: {elapsed:.2f} seconds\n")
+
     # Close full report files
     csv_file.close()
     json_file.close()
@@ -144,7 +153,7 @@ def main():
     critical_filter.save_csv(critical_csv_filename)
     critical_filter.save_json(critical_json_filename)
 
-    print("\n=== SUMMARY ===")
+    print("=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))
 
 
