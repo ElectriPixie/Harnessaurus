@@ -144,7 +144,7 @@ def main():
                         crit_row = last_crit.copy()
                         crit_row['critical_analysis'] = json.dumps(crit_row['critical_analysis'], ensure_ascii=False, indent=2)
                         crit_csv_writer.writerow(crit_row)
-                        crit_json_file.write(json.dumps(last_crit, ensure_ascii=False) + '\n')
+                        crit_json_file.write(json.dumps(last_crit, ensure_ascii=False, indent=2) + '\n')
 
                         # Flush critical files
                         crit_csv_file.flush()

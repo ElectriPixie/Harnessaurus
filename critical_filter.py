@@ -116,7 +116,7 @@ class CriticalRecordFilter:
                 writer.writeheader()
                 for rec in self.critical_records:
                     row = rec.copy()
-                    row['critical_analysis'] = json.dumps(row['critical_analysis'], ensure_ascii=False)
+                    row['critical_analysis'] = json.dumps(row['critical_analysis'], ensure_ascii=False, indent=2)
                     writer.writerow(row)
         except Exception as e:
             print(f"[save_csv] Exception while saving CSV: {e}")
@@ -129,6 +129,6 @@ class CriticalRecordFilter:
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
-                json.dumps(self.critical_records, f, indent=2, ensure_ascii=False)
+                json.dump(self.critical_records, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"[save_json] Exception while saving JSON: {e}")
