@@ -36,6 +36,7 @@ def main():
                             'detoxify_plugin.DetoxifyPlugin',
                             'hidden_injection_detector.HiddenPromptInjectionDetector',
                             'json_logger.JsonLogger',
+                            'refusal_detector.RefusalDetector',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--batch_size', type=int, default=8)
