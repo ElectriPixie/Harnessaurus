@@ -40,6 +40,8 @@ def main():
                             'reward_hacking_detector.RewardHackingDetector',
                             'deception_detector.DeceptionDetector',
                             'data_exfiltration_detector.DataExfiltrationDetector',
+                            'harmful_tool_use_monitor.HarmfulToolUseMonitor',
+                            'sabotage_detector.SabotageDetector',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--batch_size', type=int, default=8)
