@@ -1,5 +1,6 @@
 import difflib
 import requests
+import traceback
 from typing import List, Dict, Optional
 
 from plugin_loader import load_plugin
@@ -101,6 +102,12 @@ class PluginManager:
         for plugin in self.plugins:
             plugin.on_log(record)
 
+def safe_plugin_result(analysis_dict, plugin_name, index, default=None):
+    if plugin_name in analysis_dict:
+        plugin_results = analysis_dict[plugin_name]
+        if isinstance(plugin_results, list) and len(plugin_results) > index:
+            return plugin_results[index]
+    return default
 
 def run_batch_test(
     prompts_batch: List[str],
@@ -108,10 +115,6 @@ def run_batch_test(
     plugins: List[PluginBase],
     aggregator: ResultAggregator
 ) -> List[dict]:
-    """
-    Run inference and plugin analysis on batches of prompts.
-    Returns list of result records.
-    """
     pm = PluginManager(plugins)
 
     clean_prompts = prompts_batch
@@ -128,8 +131,8 @@ def run_batch_test(
         try:
             diff = diff_texts(clean_outputs[i], mutated_outputs[i])
 
-            refusal_clean = analysis_clean.get('RefusalDetector', [None]*len(clean_prompts))[i]
-            refusal_mutated = analysis_mutated.get('RefusalDetector', [None]*len(mutated_prompts))[i]
+            refusal_clean = safe_plugin_result(analysis_clean, 'RefusalDetector', i)
+            refusal_mutated = safe_plugin_result(analysis_mutated, 'RefusalDetector', i)
 
             record = {
                 'original_prompt': clean_prompts[i],
@@ -139,12 +142,15 @@ def run_batch_test(
                 'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
                 'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
                 'output_diff': diff,
+                'refusal_clean': refusal_clean,
+                'refusal_mutated': refusal_mutated,
             }
 
             pm.process_log(record)
             results.append(record)
         except Exception as e:
             print(f"Error processing record {i}: {e}")
+            traceback.print_exc()
 
     for rec in results:
         aggregator.add_record(rec)
