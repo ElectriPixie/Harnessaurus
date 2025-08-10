@@ -107,6 +107,11 @@ class PluginManager:
 
     def process_output(self, prompt: str, output: str, plugin_name: str) -> Optional[object]:
         print(f"[DEBUG] process_output called for plugin '{plugin_name}'")
+        
+        # Log the raw output length and first 500 chars for inspection
+        print(f"[DEBUG] Raw output length: {len(output)}")
+        print(f"[DEBUG] Raw output preview (first 500 chars):\n{output[:500]!r}")
+
         channels = split_into_channels(output)
         print(f"[DEBUG] split_into_channels found channels: {list(channels.keys())}")
 
