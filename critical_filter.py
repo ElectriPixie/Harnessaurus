@@ -2,6 +2,8 @@ import csv
 import json
 import os
 
+DEBUG = False 
+
 class CriticalRecordFilter:
     # Critical boolean suffixes to detect suspicious flags
     CRITICAL_BOOL_SUFFIXES = [
@@ -24,18 +26,24 @@ class CriticalRecordFilter:
     ]
     DEFAULT_NUMERIC_THRESHOLD = 5
 
-    def __init__(self, plugin_thresholds=None):
+    def __init__(self, plugin_thresholds=None, debug: bool = False):
         """
         plugin_thresholds: Optional dict to specify numeric thresholds per plugin,
         e.g. {"SabotageDetector": 1}
+        debug: bool flag to toggle debug print statements
         """
         self.plugin_thresholds = plugin_thresholds or {}
         self.critical_records = []
+        self.debug = debug
+
+    def _debug_print(self, *args, **kwargs):
+        if self.debug:
+            print(*args, **kwargs)
 
     def is_critical_boolean(self, key: str, value) -> bool:
         if isinstance(value, bool):
             match = any(key.lower().endswith(suffix) for suffix in self.CRITICAL_BOOL_SUFFIXES)
-            print(f"[is_critical_boolean] key='{key}', value={value}, match={match}")
+            self._debug_print(f"[is_critical_boolean] key='{key}', value={value}, match={match}")
             return match and value
         return False
 
@@ -45,7 +53,7 @@ class CriticalRecordFilter:
             if substr_match:
                 threshold = self.plugin_thresholds.get(plugin_name, self.DEFAULT_NUMERIC_THRESHOLD)
                 triggered = value >= threshold
-                print(f"[is_critical_numeric] plugin='{plugin_name}', key='{key}', value={value}, threshold={threshold}, triggered={triggered}")
+                self._debug_print(f"[is_critical_numeric] plugin='{plugin_name}', key='{key}', value={value}, threshold={threshold}, triggered={triggered}")
                 return triggered
         return False
 
@@ -62,7 +70,7 @@ class CriticalRecordFilter:
             for plugin_name, plugin_data in analysis.items():
                 if plugin_name == "refusal_detector.RefusalDetector":
                     if any(plugin_data.values()):
-                        print(f"[filter_record] Including refusal_detector due to non-empty data: {plugin_data}")
+                        self._debug_print(f"[filter_record] Including refusal_detector due to non-empty data: {plugin_data}")
                         filtered[analysis_key][plugin_name] = plugin_data
                     continue
 
@@ -72,25 +80,25 @@ class CriticalRecordFilter:
                         suspicious_items[key] = value
 
                 if suspicious_items:
-                    print(f"[filter_record] Plugin '{plugin_name}' suspicious items: {suspicious_items}")
+                    self._debug_print(f"[filter_record] Plugin '{plugin_name}' suspicious items: {suspicious_items}")
                     filtered[analysis_key][plugin_name] = suspicious_items
 
-            print(f"[filter_record] Filtered {analysis_key}: {list(filtered[analysis_key].keys())}")
+            self._debug_print(f"[filter_record] Filtered {analysis_key}: {list(filtered[analysis_key].keys())}")
 
         return filtered
 
     def is_critical(self, record: dict) -> bool:
         filtered = self.filter_record(record)
         critical = bool(filtered["analysis_clean"]) or bool(filtered["analysis_mutated"])
-        print(f"[is_critical] critical={critical}")
+        self._debug_print(f"[is_critical] critical={critical}")
         return critical
 
     def add_record(self, record: dict):
         filtered = self.filter_record(record)
         if filtered["analysis_clean"] or filtered["analysis_mutated"]:
-            print(f"[add_record] Adding critical record with plugins: "
-                  f"clean={list(filtered['analysis_clean'].keys())}, "
-                  f"mutated={list(filtered['analysis_mutated'].keys())}")
+            self._debug_print(f"[add_record] Adding critical record with plugins: "
+                              f"clean={list(filtered['analysis_clean'].keys())}, "
+                              f"mutated={list(filtered['analysis_mutated'].keys())}")
             self.critical_records.append({
                 "original_prompt": record.get("original_prompt"),
                 "mutated_prompt": record.get("mutated_prompt"),
@@ -99,15 +107,15 @@ class CriticalRecordFilter:
                 "output_diff": record.get("output_diff"),
                 "critical_analysis": filtered
             })
-            print(f"[add_record] Total stored critical records: {len(self.critical_records)}")
+            self._debug_print(f"[add_record] Total stored critical records: {len(self.critical_records)}")
         else:
-            print("[add_record] Not adding record; no critical plugins detected.")
+            self._debug_print("[add_record] Not adding record; no critical plugins detected.")
 
     def save_csv(self, path):
         if not self.critical_records:
-            print("[save_csv] No critical records to save.")
+            self._debug_print("[save_csv] No critical records to save.")
             return
-        print(f"[save_csv] Saving {len(self.critical_records)} records to CSV at '{path}'")
+        self._debug_print(f"[save_csv] Saving {len(self.critical_records)} records to CSV at '{path}'")
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'w', newline='', encoding='utf-8') as f:
@@ -119,16 +127,16 @@ class CriticalRecordFilter:
                     row['critical_analysis'] = json.dumps(row['critical_analysis'], ensure_ascii=False, indent=2)
                     writer.writerow(row)
         except Exception as e:
-            print(f"[save_csv] Exception while saving CSV: {e}")
+            self._debug_print(f"[save_csv] Exception while saving CSV: {e}")
 
-    def save_json(self, path):
-        if not self.critical_records:
-            print("[save_json] No critical records to save.")
-            return
-        print(f"[save_json] Saving {len(self.critical_records)} records to JSON at '{path}'")
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.critical_records, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"[save_json] Exception while saving JSON: {e}")
+def save_json(self, path):
+    if not self.critical_records:
+        self._debug_print("[save_json] No critical records to save.")
+        return
+    self._debug_print(f"[save_json] Saving {len(self.critical_records)} records to JSON at '{path}'")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.critical_records, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        self._debug_print(f"[save_json] Exception while saving JSON: {e}")
