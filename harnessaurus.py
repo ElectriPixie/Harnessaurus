@@ -56,20 +56,15 @@ def main():
 
     args = parser.parse_args()
 
-    # Load prompts as a list of strings
     prompts = load_list_from_file(args.prompts)
-
-    # Timestamp for filenames
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
-    # Plugin parameter mappings
     plugin_param_map = {
         'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': args.forbidden_keywords},
         'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': args.evasive_phrases},
         'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs.txt'},
     }
 
-    # Load plugins with parameters
     plugins = []
     for spec in args.plugins:
         params = plugin_param_map.get(spec, {})
@@ -79,79 +74,99 @@ def main():
         plugin = load_plugin(spec, **params)
         plugins.append(plugin)
 
-    # Initialize model, aggregator, and critical filter
     model = GPTModel(args.server_url, args.model_name)
     aggregator = ResultAggregator()
     critical_filter = CriticalRecordFilter()
 
-    # Prepare report directory and files early
     report_dir = 'reports'
     os.makedirs(report_dir, exist_ok=True)
 
-    csv_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.csv')
-    json_filename = os.path.join(report_dir, f'redteam_results_{timestamp}.jsonl')  # use jsonl for incremental writes
+    # Filenames for full reports
+    full_csv_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.csv')
+    full_json_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.jsonl')
 
-    # Open CSV and JSONL for progressive writing
-    csv_file = open(csv_filename, 'w', newline='', encoding='utf-8')
-    json_file = open(json_filename, 'a', encoding='utf-8')
+    # Filenames for critical filtered reports
+    crit_csv_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
+    crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
-    # Define CSV columns - flat fields for main info, you can extend if you want
-    csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff']
-    csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
-    csv_writer.writeheader()
+    # Open full report files
+    full_csv_file = open(full_csv_path, 'w', newline='', encoding='utf-8')
+    full_json_file = open(full_json_path, 'w', encoding='utf-8')
 
-    # Batch prompts
+    # Open critical report files
+    crit_csv_file = open(crit_csv_path, 'w', newline='', encoding='utf-8')
+    crit_json_file = open(crit_json_path, 'w', encoding='utf-8')
+
+    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff']
+    full_csv_writer = csv.DictWriter(full_csv_file, fieldnames=full_csv_fields)
+    full_csv_writer.writeheader()
+
+    crit_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'critical_analysis']
+    crit_csv_writer = csv.DictWriter(crit_csv_file, fieldnames=crit_csv_fields)
+    crit_csv_writer.writeheader()
+
     batches = list(batchify(prompts, args.batch_size))
 
-    # Start timing before batch processing
     start_time = time.perf_counter()
 
-    # Run batches in ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = [executor.submit(run_batch_test, batch, model, plugins, aggregator) for batch in batches]
         for future in concurrent.futures.as_completed(futures):
             try:
                 results = future.result()
                 for r in results:
-                    # Print nicely
+                    # Debug prints
+                    print(f"[Main] Plugins clean: {list(r.get('analysis_clean', {}).keys())}")
+                    print(f"[Main] Plugins mutated: {list(r.get('analysis_mutated', {}).keys())}")
                     print(json.dumps(r, indent=2, ensure_ascii=False))
 
-                    # Write full logs
-                    csv_writer.writerow({
-                        'original_prompt': r['original_prompt'],
-                        'mutated_prompt': r['mutated_prompt'],
-                        'clean_output': r['clean_output'],
-                        'mutated_output': r['mutated_output'],
-                        'output_diff': r['output_diff'],
+                    # Write full report records incrementally
+                    full_csv_writer.writerow({
+                        'original_prompt': r.get('original_prompt', ''),
+                        'mutated_prompt': r.get('mutated_prompt', ''),
+                        'clean_output': r.get('clean_output', ''),
+                        'mutated_output': r.get('mutated_output', ''),
+                        'output_diff': r.get('output_diff', ''),
                     })
-                    json_file.write(json.dumps(r) + '\n')
+                    full_json_file.write(json.dumps(r, ensure_ascii=False) + '\n')
 
-                    # Add to critical filter if critical
+                    # Flush to ensure data is saved
+                    full_csv_file.flush()
+                    full_json_file.flush()
+
+                    # Add to aggregator
+                    aggregator.add_record(r)
+
+                    # Check critical and write critical records incrementally
                     if critical_filter.is_critical(r):
                         critical_filter.add_record(r)
+                        last_crit = critical_filter.critical_records[-1]
+                        crit_row = last_crit.copy()
+                        crit_row['critical_analysis'] = json.dumps(crit_row['critical_analysis'], ensure_ascii=False, indent=2)
+                        crit_csv_writer.writerow(crit_row)
+                        crit_json_file.write(json.dumps(last_crit, ensure_ascii=False) + '\n')
+
+                        # Flush critical files
+                        crit_csv_file.flush()
+                        crit_json_file.flush()
 
             except Exception as e:
                 print(f"Error in batch: {e}")
 
-    # Stop timing after batch processing
     end_time = time.perf_counter()
     elapsed = end_time - start_time
     print(f"\nTotal runtime: {elapsed:.2f} seconds\n")
 
-    # Close full report files
-    csv_file.close()
-    json_file.close()
+    # Close all files
+    full_csv_file.close()
+    full_json_file.close()
+    crit_csv_file.close()
+    crit_json_file.close()
 
-    # Save final aggregator full reports if needed
-    aggregator.save_csv(csv_filename.replace('.csv', '_full.csv'))
-    aggregator.save_json(json_filename.replace('.jsonl', '_full.json'))
-
-    # Save critical filtered reports
-    critical_csv_filename = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
-    critical_json_filename = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
-
-    critical_filter.save_csv(critical_csv_filename)
-    critical_filter.save_json(critical_json_filename)
+    print(f"[Saved] Full CSV: {full_csv_path}")
+    print(f"[Saved] Full JSON: {full_json_path}")
+    print(f"[Saved] Critical CSV: {crit_csv_path}")
+    print(f"[Saved] Critical JSON: {crit_json_path}")
 
     print("=== SUMMARY ===")
     print(json.dumps(aggregator.generate_summary(), indent=2))

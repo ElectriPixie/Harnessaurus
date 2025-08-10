@@ -76,69 +76,78 @@ class ResultAggregator:
         }
 
     def save_csv(self, filepath: str):
-        keys = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output']
-        plugin_keys = set()
-        numeric_metrics = set()
+        try:
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            keys = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output']
+            plugin_keys = set()
+            numeric_metrics = set()
 
-        for record in self.records:
-            for key in ['analysis_clean', 'analysis_mutated']:
-                analysis = record.get(key)
-                if not analysis:
-                    continue
-                plugin_keys.update(analysis.keys())
-                for plugin_result in analysis.values():
-                    if not isinstance(plugin_result, dict):
+            for record in self.records:
+                for key in ['analysis_clean', 'analysis_mutated']:
+                    analysis = record.get(key)
+                    if not analysis:
                         continue
-                    numeric_metrics.update(
-                        metric for metric, val in plugin_result.items()
-                        if isinstance(val, (int, float))
-                    )
+                    plugin_keys.update(analysis.keys())
+                    for plugin_result in analysis.values():
+                        if not isinstance(plugin_result, dict):
+                            continue
+                        numeric_metrics.update(
+                            metric for metric, val in plugin_result.items()
+                            if isinstance(val, (int, float))
+                        )
 
-        plugin_keys = sorted(plugin_keys)
-        numeric_metrics = sorted(numeric_metrics)
+            plugin_keys = sorted(plugin_keys)
+            numeric_metrics = sorted(numeric_metrics)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.writer(csvfile)
-            header = keys
-            header += [f"{p}_clean_flagged" for p in plugin_keys]
-            header += [f"{p}_mutated_flagged" for p in plugin_keys]
-
-            for p in plugin_keys:
-                for metric in numeric_metrics:
-                    header.append(f"{p}_clean_{metric}")
-            for p in plugin_keys:
-                for metric in numeric_metrics:
-                    header.append(f"{p}_mutated_{metric}")
-
-            writer.writerow(header)
-
-            for r in self.records:
-                row = [r.get(k, '') for k in keys]
-
-                for p in plugin_keys:
-                    row.append(str(r.get('analysis_clean', {}).get(p, {}).get('flagged', False)))
-                for p in plugin_keys:
-                    row.append(str(r.get('analysis_mutated', {}).get(p, {}).get('flagged', False)))
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                header = keys
+                header += [f"{p}_clean_flagged" for p in plugin_keys]
+                header += [f"{p}_mutated_flagged" for p in plugin_keys]
 
                 for p in plugin_keys:
                     for metric in numeric_metrics:
-                        val = r.get('analysis_clean', {}).get(p, {}).get(metric, '')
-                        if isinstance(val, float):
-                            val = f"{val:.4f}"
-                        row.append(val)
+                        header.append(f"{p}_clean_{metric}")
                 for p in plugin_keys:
                     for metric in numeric_metrics:
-                        val = r.get('analysis_mutated', {}).get(p, {}).get(metric, '')
-                        if isinstance(val, float):
-                            val = f"{val:.4f}"
-                        row.append(val)
+                        header.append(f"{p}_mutated_{metric}")
 
-                writer.writerow(row)
+                writer.writerow(header)
+
+                for r in self.records:
+                    row = [r.get(k, '') for k in keys]
+
+                    for p in plugin_keys:
+                        row.append(str(r.get('analysis_clean', {}).get(p, {}).get('flagged', False)))
+                    for p in plugin_keys:
+                        row.append(str(r.get('analysis_mutated', {}).get(p, {}).get('flagged', False)))
+
+                    for p in plugin_keys:
+                        for metric in numeric_metrics:
+                            val = r.get('analysis_clean', {}).get(p, {}).get(metric, '')
+                            if isinstance(val, float):
+                                val = f"{val:.4f}"
+                            row.append(val)
+                    for p in plugin_keys:
+                        for metric in numeric_metrics:
+                            val = r.get('analysis_mutated', {}).get(p, {}).get(metric, '')
+                            if isinstance(val, float):
+                                val = f"{val:.4f}"
+                            row.append(val)
+
+                    writer.writerow(row)
+            print(f"[ResultAggregator] Successfully saved CSV: {filepath}")
+        except Exception as e:
+            print(f"[ResultAggregator] Error saving CSV: {e}")
 
     def save_json(self, filepath: str):
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump({
-                'summary': self.generate_summary(),
-                'records': self.records,
-            }, f, indent=2)
+        try:
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'summary': self.generate_summary(),
+                    'records': self.records,
+                }, f, indent=2)
+            print(f"[ResultAggregator] Successfully saved JSON: {filepath}")
+        except Exception as e:
+            print(f"[ResultAggregator] Error saving JSON: {e}")
