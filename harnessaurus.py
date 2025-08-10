@@ -10,6 +10,13 @@ from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
 import concurrent.futures
 
+DEBUG = False  # global debug flag
+
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
 
 def load_list_from_file(path):
     if not path or not os.path.isfile(path):
@@ -27,6 +34,8 @@ def load_list_from_file(path):
 
 
 def main():
+    global DEBUG  # so we can set it from args
+
     parser = argparse.ArgumentParser(description="Red Team Test Harness")
     parser.add_argument('--prompts', required=True, help='File path for prompts (.txt or .json)')
     parser.add_argument('--forbidden_keywords', help='File path for forbidden keywords')
@@ -55,8 +64,13 @@ def main():
     parser.add_argument('--max_workers', type=int, default=4)
     parser.add_argument('--server_url', required=True, help='llama-server base URL, e.g. http://localhost:6589')
     parser.add_argument('--model_name', default='llama', help='Model name for llama-server API')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
 
     args = parser.parse_args()
+
+    DEBUG = args.debug
+
+    debug_print(f"[Main] Starting with debug mode ON")
 
     prompts = load_list_from_file(args.prompts)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -101,6 +115,8 @@ def main():
     crit_csv_writer = csv.DictWriter(crit_csv_file, fieldnames=crit_csv_fields)
     crit_csv_writer.writeheader()
 
+    debug_print(f"[Main] Loaded {len(prompts)} prompts, batch size {args.batch_size}, max workers {args.max_workers}")
+
     batches = list(batchify(prompts, args.batch_size))
 
     # Hardcoded channel_map example — update or later make configurable
@@ -137,12 +153,9 @@ def main():
             try:
                 results = future.result()
                 for r in results:
-                    # Debug prints
-                    print(f"[Main] Plugins clean: {list(r.get('analysis_clean', {}).keys())}")
-                    print(f"[Main] Plugins mutated: {list(r.get('analysis_mutated', {}).keys())}")
-                    print(json.dumps(r, indent=2, ensure_ascii=False))
+                    debug_print(f"[Main] Plugins clean: {list(r.get('analysis_clean', {}).keys())}")
+                    debug_print(f"[Main] Plugins mutated: {list(r.get('analysis_mutated', {}).keys())}")
 
-                    # Write full report records incrementally
                     full_csv_writer.writerow({
                         'original_prompt': r.get('original_prompt', ''),
                         'mutated_prompt': r.get('mutated_prompt', ''),

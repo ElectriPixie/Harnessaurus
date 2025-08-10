@@ -11,6 +11,13 @@ from plugin_loader import load_plugin
 from plugin_base import PluginBase
 from result_aggregator import ResultAggregator
 
+DEBUG = False  # Global debug flag
+
+
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
 
 def diff_texts(text1: str, text2: str) -> str:
     """Return unified diff string comparing two texts line by line."""
@@ -55,7 +62,7 @@ class GPTModel:
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
 
-    def infer_batch(self, prompts: List[str], max_new_tokens: int = 100) -> List[str]:
+    def infer_batch(self, prompts: List[str], max_new_tokens: int = 256) -> List[str]:
         """
         Sends batch prompts to llama-server and returns list of generated texts.
         """
@@ -78,6 +85,7 @@ class GPTModel:
 
             try:
                 response = requests.post(url, headers=headers, json=payload, timeout=30)
+                print("Raw response text:", response.text)
                 response.raise_for_status()
                 data = response.json()
                 text = data["choices"][0]["message"]["content"]
@@ -87,6 +95,7 @@ class GPTModel:
                 results.append("")
 
         return results
+
 
 def batchify(lst: List[str], batch_size: int):
     """Yield successive batches from a list."""
@@ -98,7 +107,7 @@ class PluginManager:
     def __init__(self, plugins: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
         self.plugins = plugins
         self.channel_map = channel_map or {}
-        print(f"[DEBUG] Initialized PluginManager with channel_map: {self.channel_map}")
+        debug_print(f"[DEBUG] Initialized PluginManager with channel_map: {self.channel_map}")
 
     def process_prompt(self, prompt: str) -> str:
         for plugin in self.plugins:
@@ -106,49 +115,49 @@ class PluginManager:
         return prompt
 
     def process_output(self, prompt: str, output: str, plugin_name: str) -> Optional[object]:
-        print(f"[DEBUG] process_output called for plugin '{plugin_name}'")
-        
+        debug_print(f"[DEBUG] process_output called for plugin '{plugin_name}'")
+
         # Log the raw output length and first 500 chars for inspection
-        print(f"[DEBUG] Raw output length: {len(output)}")
-        print(f"[DEBUG] Raw output preview (first 500 chars):\n{output[:500]!r}")
+        debug_print(f"[DEBUG] Raw output length: {len(output)}")
+        debug_print(f"[DEBUG] Raw output preview (first 500 chars):\n{output[:500]!r}")
 
         channels = split_into_channels(output)
-        print(f"[DEBUG] split_into_channels found channels: {list(channels.keys())}")
+        debug_print(f"[DEBUG] split_into_channels found channels: {list(channels.keys())}")
 
         channels_for_plugin = self.channel_map.get(plugin_name)
         if channels_for_plugin is not None:
-            print(f"[DEBUG] channels_for_plugin for '{plugin_name}': {channels_for_plugin}")
+            debug_print(f"[DEBUG] channels_for_plugin for '{plugin_name}': {channels_for_plugin}")
         else:
-            print(f"[DEBUG] No specific channels configured for plugin '{plugin_name}', sending full output")
+            debug_print(f"[DEBUG] No specific channels configured for plugin '{plugin_name}', sending full output")
 
         if channels_for_plugin:
             selected_texts = []
             for ch in channels_for_plugin:
                 ch_text = channels.get(ch, "")
                 selected_texts.append(ch_text)
-                print(f"[DEBUG] Channel '{ch}' content for plugin '{plugin_name}': '{ch_text[:100]}...'")
+                debug_print(f"[DEBUG] Channel '{ch}' content for plugin '{plugin_name}': '{ch_text[:100]}...'")
             text_to_send = "\n".join(selected_texts)
         else:
             text_to_send = output
-            print(f"[DEBUG] Sending full raw output to plugin '{plugin_name}' (length={len(text_to_send)})")
+            debug_print(f"[DEBUG] Sending full raw output to plugin '{plugin_name}' (length={len(text_to_send)})")
 
         for plugin in self.plugins:
             if type(plugin).__name__ == plugin_name:
                 result = plugin.process_output(prompt, text_to_send)
-                print(f"[DEBUG] Plugin '{plugin_name}' process_output result: {result}")
+                debug_print(f"[DEBUG] Plugin '{plugin_name}' process_output result: {result}")
                 return result
-        print(f"[DEBUG] Plugin '{plugin_name}' not found among loaded plugins")
+        debug_print(f"[DEBUG] Plugin '{plugin_name}' not found among loaded plugins")
         return None
 
     def process_batch_output(self, prompts: List[str], outputs: List[str]) -> Dict[str, List[Optional[object]]]:
         results = {}
         for plugin in self.plugins:
             plugin_name = type(plugin).__name__
-            print(f"[DEBUG] Processing batch output for plugin '{plugin_name}'")
+            debug_print(f"[DEBUG] Processing batch output for plugin '{plugin_name}'")
             if hasattr(plugin, 'process_batch'):
                 batch_results = plugin.process_batch(prompts, outputs)
                 results[plugin_name] = batch_results
-                print(f"[DEBUG] Plugin '{plugin_name}' batch process result count: {len(batch_results)}")
+                debug_print(f"[DEBUG] Plugin '{plugin_name}' batch process result count: {len(batch_results)}")
             else:
                 plugin_results = []
                 for p, o in zip(prompts, outputs):
