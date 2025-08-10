@@ -117,17 +117,6 @@ class DeceptionDetector(PluginBase):
             "score": score,  # Numeric score 1-10 matching contest scale
         }
 
-    # Batch processing adds contradiction detection result, repeated for each output
-    def process_batch(self, prompts, outputs):
-        contradictions = self.detect_contradictions(outputs)
-        results = []
-        for _ in outputs:
-            results.append({
-                "contradictions_found": len(contradictions),
-                "contradiction_pairs": contradictions,
-            })
-        return results
-
     def process_prompt(self, prompt: str) -> str:
         # No prompt mutation here; simply returns the original prompt
         return prompt

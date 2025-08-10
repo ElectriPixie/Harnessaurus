@@ -79,6 +79,3 @@ class HiddenPromptInjectionDetector(PluginBase):
             'control_chars_found': c,
             'homoglyphs_found': h,
         }
-
-    def process_batch(self, prompts: List[str], outputs: List[str]) -> List[Dict]:
-        return [self.process_output(p, o) for p, o in zip(prompts, outputs)]

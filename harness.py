@@ -82,13 +82,13 @@ class GPTModel:
                 data = response.json()
                 chunk = data["choices"][0]["message"]["content"]
 
-                print(f"[Chunk {i+1}] Generated chunk length: {len(chunk)}")
+                #print(f"[Chunk {i+1}] Generated chunk length: {len(chunk)}")
                 full_output += chunk
 
                 finish_reason = data["choices"][0].get("finish_reason", "")
                 if finish_reason != "length":
                     # generation stopped naturally (not truncated)
-                    print(f"Generation finished at chunk {i+1} with reason: {finish_reason}")
+                    #print(f"Generation finished at chunk {i+1} with reason: {finish_reason}")
                     break
 
                 # Append the new chunk to prompt for next iteration to continue from there
@@ -97,50 +97,9 @@ class GPTModel:
                 print(f"Error during iterative generation at chunk {i+1}: {e}")
                 break
 
-        print("Raw full_output: ", full_output)
+        #print("Raw full_output: ", full_output)
 
         return full_output
-
-    def infer_batch(self, prompts: List[str], max_new_tokens: int = 256, iterative=False, max_iterations=10) -> List[str]:
-        """
-        Send batch prompts to llama-server and return generated texts.
-        If iterative=True, perform chunked iterative generation per prompt.
-        """
-        results = []
-        if iterative:
-            for prompt in prompts:
-                print(f"Starting iterative generation for prompt (len={len(prompt)}): {prompt[:50]!r}...")
-                output = self.infer_iterative(prompt, max_chunk_tokens=max_new_tokens, max_iterations=max_iterations)
-                results.append(output)
-        else:
-            url = f"{self.server_url}/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
-
-            for prompt in prompts:
-                payload = {
-                    "model": self.model_name,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_new_tokens,
-                    "temperature": 0,
-                }
-
-                try:
-                    response = requests.post(url, headers=headers, json=payload, timeout=30)
-                    response.raise_for_status()
-                    data = response.json()
-                    text = data["choices"][0]["message"]["content"]
-                    results.append(text)
-                except Exception as e:
-                    print(f"Error generating text for prompt:\n{prompt}\nException: {e}")
-                    results.append("")
-
-        return results
-
-
-def batchify(lst: List[str], batch_size: int):
-    """Yield successive batches from a list."""
-    for i in range(0, len(lst), batch_size):
-        yield lst[i:i + batch_size]
 
 
 class PluginManager:
@@ -188,23 +147,6 @@ class PluginManager:
         debug_print(f"[DEBUG] Plugin '{plugin_name}' not found among loaded plugins")
         return None
 
-    def process_batch_output(self, prompts: List[str], outputs: List[str]) -> Dict[str, List[Optional[object]]]:
-        results = {}
-        for plugin in self.plugins:
-            plugin_name = type(plugin).__name__
-            debug_print(f"[DEBUG] Processing batch output for plugin '{plugin_name}'")
-            if hasattr(plugin, 'process_batch'):
-                batch_results = plugin.process_batch(prompts, outputs)
-                results[plugin_name] = batch_results
-                debug_print(f"[DEBUG] Plugin '{plugin_name}' batch process result count: {len(batch_results)}")
-            else:
-                plugin_results = []
-                for p, o in zip(prompts, outputs):
-                    res = self.process_output(p, o, plugin_name)
-                    plugin_results.append(res)
-                results[plugin_name] = plugin_results
-        return results
-
     def process_log(self, record: dict) -> None:
         for plugin in self.plugins:
             if hasattr(plugin, 'on_log'):
@@ -219,45 +161,52 @@ def safe_plugin_result(analysis_dict, plugin_name, index, default=None):
     return default
 
 
-def run_batch_test(
-    prompts_batch: List[str],
+def run_prompt_test(
+    prompt: str,
     model: GPTModel,
     plugins: List[PluginBase],
     aggregator: ResultAggregator,
-    channel_map: Optional[Dict[str, List[str]]] = None
+    channel_map: Optional[Dict[str, List[str]]] = None,
+    max_tokens_per_chunk: int = 256,
+    max_iterations: int = 10,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
-    clean_prompts = prompts_batch
-    mutated_prompts = [pm.process_prompt(p) for p in clean_prompts]
-
-    # Use iterative generation to get full output instead of truncated 256-token output
-    clean_outputs = model.infer_batch(clean_prompts, max_new_tokens=256, iterative=True, max_iterations=10)
-    mutated_outputs = model.infer_batch(mutated_prompts, max_new_tokens=256, iterative=True, max_iterations=10)
-
-    analysis_clean = pm.process_batch_output(clean_prompts, clean_outputs)
-    analysis_mutated = pm.process_batch_output(mutated_prompts, mutated_outputs)
+    clean_prompt = prompt
+    mutated_prompt = pm.process_prompt(clean_prompt)
+    #print("prompt: ", clean_prompt)
+    clean_output = model.infer_iterative(clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
+    #print("mutated prompt: ", mutated_prompt)
+    mutated_output = model.infer_iterative(mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
 
     results = []
-    for i in range(len(clean_prompts)):
-        try:
-            diff = diff_texts(clean_outputs[i], mutated_outputs[i])
 
-            record = {
-                'original_prompt': clean_prompts[i],
-                'mutated_prompt': mutated_prompts[i],
-                'clean_output': clean_outputs[i],
-                'mutated_output': mutated_outputs[i],
-                'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
-                'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
-                'output_diff': diff,
-            }
+    try:
+        diff = diff_texts(clean_output, mutated_output)
 
-            pm.process_log(record)
-            results.append(record)
-        except Exception as e:
-            print(f"Error processing record {i}: {e}")
-            traceback.print_exc()
+        analysis_clean = {}
+        analysis_mutated = {}
+
+        for plugin in plugins:
+            plugin_name = type(plugin).__name__
+            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+            analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
+
+        record = {
+            'original_prompt': clean_prompt,
+            'mutated_prompt': mutated_prompt,
+            'clean_output': clean_output,
+            'mutated_output': mutated_output,
+            'analysis_clean': analysis_clean,
+            'analysis_mutated': analysis_mutated,
+            'output_diff': diff,
+        }
+
+        pm.process_log(record)
+        results.append(record)
+    except Exception as e:
+        print(f"Error processing record for prompt: {clean_prompt}\n{e}")
+        traceback.print_exc()
 
     for rec in results:
         aggregator.add_record(rec)

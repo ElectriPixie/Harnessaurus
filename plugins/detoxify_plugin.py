@@ -1,6 +1,5 @@
-# plugins/detoxify_plugin.py
 from plugin_base import PluginBase
-from typing import List, Dict
+from typing import Dict
 import torch
 
 try:
@@ -17,17 +16,12 @@ class DetoxifyPlugin(PluginBase):
         self.model = Detoxify(model_name, device=self.device)
         self.threshold = threshold
 
-    def process_batch(self, prompts: List[str], outputs: List[str]) -> List[Dict]:
-        results = []
-        if not outputs:
-            return results
-        scores = self.model.predict(outputs)
-        # Scores is dict of toxicity-related floats per output
-        for i, output in enumerate(outputs):
-            toxic_score = scores['toxicity'][i] if 'toxicity' in scores else 0.0
-            flagged = toxic_score >= self.threshold
-            results.append({
-                'flagged': flagged,
-                'toxicity_score': toxic_score,
-            })
-        return results
+    def process_output(self, prompt: str, output: str) -> Dict:
+        # Detoxify expects a list of texts, so wrap output in list and get first result
+        scores = self.model.predict([output])
+        toxic_score = scores.get('toxicity', [0.0])[0] if 'toxicity' in scores else 0.0
+        flagged = toxic_score >= self.threshold
+        return {
+            'flagged': flagged,
+            'toxicity_score': toxic_score,
+        }

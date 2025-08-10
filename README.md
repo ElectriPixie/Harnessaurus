@@ -87,7 +87,7 @@ pip install -r requirements.txt
 python harnessaurus.py --prompts data/prompts.txt --model_path gpt-oss-20b
 ```
 
-You can customize plugins, batch size, max workers, and more via command line arguments.
+You can customize plugins, and more via command line arguments.
 
 ---
 
