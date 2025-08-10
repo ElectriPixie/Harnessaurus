@@ -131,9 +131,6 @@ def run_batch_test(
         try:
             diff = diff_texts(clean_outputs[i], mutated_outputs[i])
 
-            refusal_clean = safe_plugin_result(analysis_clean, 'RefusalDetector', i)
-            refusal_mutated = safe_plugin_result(analysis_mutated, 'RefusalDetector', i)
-
             record = {
                 'original_prompt': clean_prompts[i],
                 'mutated_prompt': mutated_prompts[i],
@@ -142,8 +139,6 @@ def run_batch_test(
                 'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
                 'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
                 'output_diff': diff,
-                'refusal_clean': refusal_clean,
-                'refusal_mutated': refusal_mutated,
             }
 
             pm.process_log(record)
