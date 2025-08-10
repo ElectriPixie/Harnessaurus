@@ -10,6 +10,7 @@ from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
 import concurrent.futures
 
+
 def load_list_from_file(path):
     if not path or not os.path.isfile(path):
         return []
@@ -23,6 +24,7 @@ def load_list_from_file(path):
                 raise ValueError(f"{path} must be JSON array of strings")
         else:
             return [line.strip() for line in f if line.strip()]
+
 
 def main():
     parser = argparse.ArgumentParser(description="Red Team Test Harness")
@@ -81,19 +83,13 @@ def main():
     report_dir = 'reports'
     os.makedirs(report_dir, exist_ok=True)
 
-    # Filenames for full reports
     full_csv_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.csv')
     full_json_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.jsonl')
-
-    # Filenames for critical filtered reports
     crit_csv_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
     crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
-    # Open full report files
     full_csv_file = open(full_csv_path, 'w', newline='', encoding='utf-8')
     full_json_file = open(full_json_path, 'w', encoding='utf-8')
-
-    # Open critical report files
     crit_csv_file = open(crit_csv_path, 'w', newline='', encoding='utf-8')
     crit_json_file = open(crit_json_path, 'w', encoding='utf-8')
 
@@ -107,10 +103,36 @@ def main():
 
     batches = list(batchify(prompts, args.batch_size))
 
+    # Hardcoded channel_map example — update or later make configurable
+    channel_map = {
+        # plugin class name (no module) : list of channels it should receive
+        'ZeroWidthInjector': [],
+        'HomoglyphSubstitutor': [],
+        'ForbiddenKeywordDetector': ['final'],
+        'AdvancedOutputAnalyzer': [],
+        'DetoxifyPlugin': ['final'],
+        'HiddenPromptInjectionDetector': ['final'],
+        'JsonLogger': [],
+        'RefusalDetector': ['final'],
+        'RewardHackingDetector': [],
+        'DeceptionDetector': [],
+        'DataExfiltrationDetector': ['final'],
+        'HarmfulToolUseMonitor': ['final'],
+        'SabotageDetector': [],
+        'SandbaggingDetector': [],
+        'HiddenMotivationDetector': [],
+        'EvaluationAwarenessDetector': [],
+        # Default fallback will pass full raw output if no key found
+    }
+
     start_time = time.perf_counter()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        futures = [executor.submit(run_batch_test, batch, model, plugins, aggregator) for batch in batches]
+        futures = [
+            executor.submit(run_batch_test, batch, model, plugins, aggregator, channel_map=channel_map)
+            for batch in batches
+        ]
+
         for future in concurrent.futures.as_completed(futures):
             try:
                 results = future.result()
@@ -130,14 +152,11 @@ def main():
                     })
                     full_json_file.write(json.dumps(r, ensure_ascii=False) + '\n')
 
-                    # Flush to ensure data is saved
                     full_csv_file.flush()
                     full_json_file.flush()
 
-                    # Add to aggregator
                     aggregator.add_record(r)
 
-                    # Check critical and write critical records incrementally
                     if critical_filter.is_critical(r):
                         critical_filter.add_record(r)
                         last_crit = critical_filter.critical_records[-1]
@@ -146,7 +165,6 @@ def main():
                         crit_csv_writer.writerow(crit_row)
                         crit_json_file.write(json.dumps(last_crit, ensure_ascii=False, indent=2) + '\n')
 
-                        # Flush critical files
                         crit_csv_file.flush()
                         crit_json_file.flush()
 
@@ -157,7 +175,6 @@ def main():
     elapsed = end_time - start_time
     print(f"\nTotal runtime: {elapsed:.2f} seconds\n")
 
-    # Close all files
     full_csv_file.close()
     full_json_file.close()
     crit_csv_file.close()
