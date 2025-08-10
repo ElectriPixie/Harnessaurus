@@ -125,20 +125,28 @@ def run_batch_test(
 
     results = []
     for i in range(len(clean_prompts)):
-        diff = diff_texts(clean_outputs[i], mutated_outputs[i])
+        try:
+            diff = diff_texts(clean_outputs[i], mutated_outputs[i])
 
-        record = {
-            'original_prompt': clean_prompts[i],
-            'mutated_prompt': mutated_prompts[i],
-            'clean_output': clean_outputs[i],
-            'mutated_output': mutated_outputs[i],
-            'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
-            'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
-            'output_diff': diff,
-        }
+            refusal_clean = analysis_clean.get('RefusalDetector', [None]*len(clean_prompts))[i]
+            refusal_mutated = analysis_mutated.get('RefusalDetector', [None]*len(mutated_prompts))[i]
 
-        pm.process_log(record)
-        results.append(record)
+            record = {
+                'original_prompt': clean_prompts[i],
+                'mutated_prompt': mutated_prompts[i],
+                'clean_output': clean_outputs[i],
+                'mutated_output': mutated_outputs[i],
+                'analysis_clean': {plugin: analysis_clean[plugin][i] for plugin in analysis_clean},
+                'analysis_mutated': {plugin: analysis_mutated[plugin][i] for plugin in analysis_mutated},
+#                'refusal_clean': refusal_clean,
+#                'refusal_mutated': refusal_mutated,
+                'output_diff': diff,
+            }
+
+            pm.process_log(record)
+            results.append(record)
+        except Exception as e:
+            print(f"Error processing record {i}: {e}")
 
     for rec in results:
         aggregator.add_record(rec)

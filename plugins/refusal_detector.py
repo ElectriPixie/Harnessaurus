@@ -11,12 +11,12 @@ class RefusalDetector(PluginBase):
     ]
 
     def process_output(self, prompt: str, output: str):
-        # Return True if output contains any refusal phrase (case insensitive)
         output_lower = output.lower()
         for phrase in self.REFUSAL_PHRASES:
             if phrase.lower() in output_lower:
-                return "refused"
-        return "accepted"
+                return {"status": "refused"}
+        return {"status": "accepted"}
+
 
     def process_prompt(self, prompt: str) -> str:
         # No prompt modification
