@@ -103,7 +103,7 @@ class PluginManager:
     def __init__(self, plugins: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
         self.plugins = plugins
         self.channel_map = channel_map or {}
-        debug_print(f"[DEBUG] Initialized PluginManager with channel_map: {self.channel_map}")
+        #debug_print(f"[DEBUG] Initialized PluginManager with channel_map: {self.channel_map}")
 
     def process_prompt(self, prompt: str) -> str:
         for plugin in self.plugins:
@@ -159,53 +159,63 @@ def safe_plugin_result(analysis_dict, plugin_name, index, default=None):
 
 
 def run_prompt_test(
-    prompt: str,
+    prompt_or_prompts,  # accept either str or List[str]
     model: GPTModel,
     plugins: List[PluginBase],
     aggregator: ResultAggregator,
     channel_map: Optional[Dict[str, List[str]]] = None,
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
-) -> List[dict]:
+):
+    single_prompt_mode = isinstance(prompt_or_prompts, str)
+    prompts = [prompt_or_prompts] if single_prompt_mode else prompt_or_prompts
+
     pm = PluginManager(plugins, channel_map=channel_map)
 
-    clean_prompt = prompt
-    mutated_prompt = pm.process_prompt(clean_prompt)
-    #print("prompt: ", clean_prompt)
-    clean_output = model.infer_iterative(clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
-    #print("mutated prompt: ", mutated_prompt)
-    mutated_output = model.infer_iterative(mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
+    clean_prompts = prompts
+    mutated_prompts = [pm.process_prompt(p) for p in clean_prompts]
+
+    clean_outputs = []
+    mutated_outputs = []
+
+    for p in clean_prompts:
+        clean_outputs.append(model.infer_iterative(p, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations))
+    for p in mutated_prompts:
+        mutated_outputs.append(model.infer_iterative(p, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations))
 
     results = []
+    for i in range(len(clean_prompts)):
+        try:
+            diff = diff_texts(clean_outputs[i], mutated_outputs[i])
 
-    try:
-        diff = diff_texts(clean_output, mutated_output)
+            analysis_clean = {}
+            analysis_mutated = {}
 
-        analysis_clean = {}
-        analysis_mutated = {}
+            for plugin in plugins:
+                plugin_name = type(plugin).__name__
+                analysis_clean[plugin_name] = pm.process_output(clean_prompts[i], clean_outputs[i], plugin_name)
+                analysis_mutated[plugin_name] = pm.process_output(mutated_prompts[i], mutated_outputs[i], plugin_name)
 
-        for plugin in plugins:
-            plugin_name = type(plugin).__name__
-            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
-            analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
+            record = {
+                'analysis_clean': analysis_clean,
+                'analysis_mutated': analysis_mutated,
+                'original_prompt': clean_prompts[i],
+                'mutated_prompt': mutated_prompts[i],
+                'clean_output': clean_outputs[i],
+                'mutated_output': mutated_outputs[i],
+                'output_diff': diff,
+            }
 
-        record = {
-            'original_prompt': clean_prompt,
-            'mutated_prompt': mutated_prompt,
-            'clean_output': clean_output,
-            'mutated_output': mutated_output,
-            'analysis_clean': analysis_clean,
-            'analysis_mutated': analysis_mutated,
-            'output_diff': diff,
-        }
-
-        pm.process_log(record)
-        results.append(record)
-    except Exception as e:
-        print(f"Error processing record for prompt: {clean_prompt}\n{e}")
-        traceback.print_exc()
+            pm.process_log(record)
+            results.append(record)
+        except Exception as e:
+            print(f"Error processing record {i}: {e}")
+            traceback.print_exc()
 
     for rec in results:
         aggregator.add_record(rec)
 
-    return results
+    if single_prompt_mode:
+        return results[0] if results else None
+    else:
+        return results

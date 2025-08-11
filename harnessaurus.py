@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import csv
+import traceback
 from datetime import datetime
 from plugin_loader import load_plugin
 from result_aggregator import ResultAggregator
@@ -40,7 +41,7 @@ def main():
                             'zero_width_injector.ZeroWidthInjector',
                             'homoglyph_substitutor.HomoglyphSubstitutor',
                             'forbidden_keyword_detector.ForbiddenKeywordDetector',
-                            'advanced_output_analyzer.AdvancedOutputAnalyzer',
+                            #'advanced_output_analyzer.AdvancedOutputAnalyzer',
                             'detoxify_plugin.DetoxifyPlugin',
                             'hidden_injection_detector.HiddenPromptInjectionDetector',
                             'json_logger.JsonLogger',
@@ -97,36 +98,17 @@ def main():
         'HiddenPromptInjectionDetector': ['final'],
         'JsonLogger': [],
         'RefusalDetector': ['final'],
-        'RewardHackingDetector': [],
-        'DeceptionDetector': [],
+        'RewardHackingDetector': ['final'],
+        'DeceptionDetector': ['final'],
         'DataExfiltrationDetector': ['final'],
         'HarmfulToolUseMonitor': ['final'],
-        'SabotageDetector': [],
+        'SabotageDetector': ['final'],
         'SandbaggingDetector': [],
         'HiddenMotivationDetector': [],
         'EvaluationAwarenessDetector': [],
     }
 
     all_records = []
-
-
-    for prompt in prompts:
-        recs = run_prompt_test(
-            prompt=prompt,  # pass a single prompt string directly
-            plugins=plugins,
-            model=model,
-            aggregator=aggregator,
-            channel_map=channel_map,
-            max_tokens_per_chunk=args.max_tokens_per_chunk,
-            max_iterations=args.max_iterations,
-        )
-        #print(json.dumps(recs, indent=2, ensure_ascii=False))
-        all_records.extend(recs)
-
-
-        for r in recs:
-            if critical_filter.is_critical(r):
-                critical_filter.add_record(r)
 
     report_dir = "reports"
     os.makedirs(report_dir, exist_ok=True)
@@ -137,13 +119,37 @@ def main():
     crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
     with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
-         open(full_json_path, 'w', encoding='utf-8') as f_json:
+         open(full_json_path, 'w', encoding='utf-8') as f_json, \
+         open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
+         open(crit_json_path, 'w', encoding='utf-8') as crit_json:
 
         full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff']
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
 
-        for rec in all_records:
+        crit_csv_fields = [
+            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
+            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+        ]
+        crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
+        crit_writer.writeheader()
+
+        for i, prompt in enumerate(prompts, 1):
+            print(f"[Processing] Prompt {i}/{len(prompts)}...")
+            rec = run_prompt_test(
+                prompt,              # prompt_or_prompts
+                model,               # GPTModel instance
+                plugins,             # list of plugins
+                aggregator,          # ResultAggregator instance
+                channel_map=channel_map,
+                max_tokens_per_chunk=args.max_tokens_per_chunk,
+                max_iterations=args.max_iterations,
+            )
+            if critical_filter.is_critical(rec):
+                critical_filter.add_record(rec)
+            all_records.append(rec)
+
+            # Write full record immediately
             writer.writerow({
                 'original_prompt': rec['original_prompt'],
                 'mutated_prompt': rec['mutated_prompt'],
@@ -153,18 +159,15 @@ def main():
             })
             f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
 
-    if critical_filter.critical_records:
-        with open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
-             open(crit_json_path, 'w', encoding='utf-8') as crit_json:
-
-            crit_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'critical_analysis']
-            crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
-            crit_writer.writeheader()
-
-            for crit_rec in critical_filter.critical_records:
+            # Write critical record immediately if critical
+            if critical_filter.critical_records:
+                crit_rec = critical_filter.critical_records[-1]  # last added
                 row = crit_rec.copy()
                 row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
-                crit_writer.writerow(row)
+                row['analysis_clean'] = json.dumps(row.get('analysis_clean', {}), ensure_ascii=False)
+                row['analysis_mutated'] = json.dumps(row.get('analysis_mutated', {}), ensure_ascii=False)
+                filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+                crit_writer.writerow(filtered_row)
                 crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
 
     print(f"[Saved] Full CSV: {full_csv_path}")

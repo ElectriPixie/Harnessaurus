@@ -3,7 +3,6 @@ import json
 import os
 from typing import Optional, Dict, Any
 
-
 class CriticalRecordFilter:
     """
     Filter records to find 'critical' plugin flags indicating suspicious or problematic outputs.
@@ -33,17 +32,11 @@ class CriticalRecordFilter:
     ]
     DEFAULT_NUMERIC_THRESHOLD = 5
 
-    REFUSAL_DETECTOR_PLUGIN = "refusal_detector.RefusalDetector"
-
     def __init__(self, plugin_thresholds: Optional[Dict[str, float]] = None, debug: bool = False):
-        """
-        Args:
-            plugin_thresholds: Optional dict to specify numeric thresholds per plugin.
-            debug: Enables debug printing if True.
-        """
         self.plugin_thresholds = plugin_thresholds or {}
         self.critical_records = []
-        self.debug = debug
+        self.debug = True 
+        self.refusal_detector_plugin = "RefusalDetector"
 
     def _debug_print(self, *args, **kwargs):
         if self.debug:
@@ -97,16 +90,10 @@ class CriticalRecordFilter:
             filtered[analysis_key] = {}
 
             for plugin_name, plugin_data in analysis.items():
-                # Defensive: Wrap booleans in dict for uniform processing
-                if isinstance(plugin_data, bool):
-                    plugin_data_wrapped = {"flagged": plugin_data}
-                    self._debug_print(
-                        f"[filter_record] Wrapped boolean plugin_data for '{plugin_name}': {plugin_data_wrapped}"
-                    )
-                    plugin_data = plugin_data_wrapped
+                self._debug_print(f"[filter_record] Checking plugin: {plugin_name} with data: {plugin_data}")
 
-                # If refusal_detector plugin, include it if any value is truthy
-                if plugin_name == self.REFUSAL_DETECTOR_PLUGIN:
+                if plugin_name == self.refusal_detector_plugin:
+                    self._debug_print(f"[filter_record] Found refusal detector plugin in {analysis_key}")
                     if isinstance(plugin_data, dict) and any(plugin_data.values()):
                         filtered[analysis_key][plugin_name] = plugin_data
                         self._debug_print(
@@ -135,6 +122,8 @@ class CriticalRecordFilter:
                     self._debug_print(
                         f"[filter_record] Plugin '{plugin_name}' suspicious items in {analysis_key}: {suspicious_items}"
                     )
+                else:
+                    filtered[analysis_key] = {}
 
             self._debug_print(f"[filter_record] Filtered plugins in {analysis_key}: {list(filtered[analysis_key].keys())}")
 
