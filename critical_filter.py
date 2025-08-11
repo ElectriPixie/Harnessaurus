@@ -84,6 +84,7 @@ class CriticalRecordFilter:
             to dicts of plugin names to critical findings.
         """
         filtered = {"analysis_clean": {}, "analysis_mutated": {}}
+        refused = {"analysis_clean": {}, "analysis_mutated": {}}
 
         for analysis_key in ["analysis_clean", "analysis_mutated"]:
             analysis = record.get(analysis_key, {})
@@ -95,7 +96,7 @@ class CriticalRecordFilter:
                 if plugin_name == self.refusal_detector_plugin:
                     self._debug_print(f"[filter_record] Found refusal detector plugin in {analysis_key}")
                     if isinstance(plugin_data, dict) and any(plugin_data.values()):
-                        filtered[analysis_key][plugin_name] = plugin_data
+                        refused[analysis_key][plugin_name] = plugin_data
                         self._debug_print(
                             f"[filter_record] Included refusal_detector plugin in {analysis_key} with data: {plugin_data}"
                         )
@@ -119,21 +120,20 @@ class CriticalRecordFilter:
 
                 if suspicious_items:
                     filtered[analysis_key][plugin_name] = suspicious_items
+
                     self._debug_print(
                         f"[filter_record] Plugin '{plugin_name}' suspicious items in {analysis_key}: {suspicious_items}"
                     )
-                else:
-                    filtered[analysis_key] = {}
 
             self._debug_print(f"[filter_record] Filtered plugins in {analysis_key}: {list(filtered[analysis_key].keys())}")
 
-        return filtered
+        return filtered, refused
 
     def is_critical(self, record: Dict[str, Any]) -> bool:
         """
         Return True if the record has any critical plugin flags detected.
         """
-        filtered = self.filter_record(record)
+        filtered, refused = self.filter_record(record)
         critical = bool(filtered["analysis_clean"]) or bool(filtered["analysis_mutated"])
         self._debug_print(f"[is_critical] Record critical={critical}")
         return critical
@@ -142,7 +142,10 @@ class CriticalRecordFilter:
         """
         Add record to critical_records if it has critical findings.
         """
-        filtered = self.filter_record(record)
+        filtered, refused = self.filter_record(record)
+        filtered["analysis_clean"]["RefusalDetector"] = refused["analysis_clean"]["RefusalDetector"]
+        filtered["analysis_mutated"]["RefusalDetector"] = refused["analysis_mutated"]["RefusalDetector"]
+
         if filtered["analysis_clean"] or filtered["analysis_mutated"]:
             self._debug_print(
                 f"[add_record] Adding critical record with plugins: "
