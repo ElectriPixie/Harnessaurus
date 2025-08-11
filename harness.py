@@ -49,23 +49,32 @@ def split_into_channels(text: str) -> Dict[str, str]:
     return channels
 
 
+
 class GPTModel:
-    def __init__(self, server_url: str, model_name: str = "llama"):
+    def __init__(self, server_url: str, model_name: str = "llama", max_context_chars: int = 2000):
         print(f"Using llama-server at {server_url} for model '{model_name}'")
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
+        self.max_context_chars = max_context_chars  # rough max prompt length in chars
 
     def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
         """
         Generate text iteratively by feeding back output until
-        the model finishes or max_iterations is reached.
+        the model finishes or max_iterations is reached,
+        with context length trimming to simulate context shifting.
         """
         url = f"{self.server_url}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
 
-        current_prompt = prompt
-        full_output = ""
+        initial_prompt = prompt
+        generated_text = ""
+
         for i in range(max_iterations):
+            # Build the prompt for this iteration:
+            # Take initial prompt + last part of generated text trimmed to fit max_context_chars
+            recent_context = generated_text[-(self.max_context_chars - len(initial_prompt)):]
+            current_prompt = initial_prompt + recent_context
+
             payload = {
                 "model": self.model_name,
                 "messages": [{"role": "user", "content": current_prompt}],
@@ -80,7 +89,7 @@ class GPTModel:
                 chunk = data["choices"][0]["message"]["content"]
 
                 #print(f"[Chunk {i+1}] Generated chunk length: {len(chunk)}")
-                full_output += chunk
+                generated_text += chunk
 
                 finish_reason = data["choices"][0].get("finish_reason", "")
                 if finish_reason != "length":
@@ -88,15 +97,13 @@ class GPTModel:
                     #print(f"Generation finished at chunk {i+1} with reason: {finish_reason}")
                     break
 
-                # Append the new chunk to prompt for next iteration to continue from there
-                current_prompt += chunk
             except Exception as e:
                 print(f"Error during iterative generation at chunk {i+1}: {e}")
                 break
 
-        #print("Raw full_output: ", full_output)
+        #print("Raw full_output: ", generated_text)
 
-        return full_output
+        return generated_text
 
 
 class PluginManager:
