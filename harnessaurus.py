@@ -111,6 +111,7 @@ def main():
 
 
     for prompt in prompts:
+        #print(f"[Processing] Prompt {i}/{len(prompts)}...")
         recs = run_prompt_test(
             prompt=prompt,  # pass a single prompt string directly
             plugins=plugins,
