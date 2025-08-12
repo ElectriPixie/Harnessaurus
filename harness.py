@@ -56,6 +56,49 @@ class GPTModel:
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
         self.max_context_chars = max_context_chars  # rough max prompt length in chars
+    
+    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
+        """
+        Generate text iteratively by feeding back output until
+        the model finishes or max_iterations is reached.
+        """
+        url = f"{self.server_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+
+        current_prompt = prompt
+        full_output = ""
+        for i in range(max_iterations):
+            payload = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": current_prompt}],
+                "max_tokens": max_chunk_tokens,
+                "temperature": 0,
+            }
+
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                chunk = data["choices"][0]["message"]["content"]
+
+                #print(f"[Chunk {i+1}] Generated chunk length: {len(chunk)}")
+                full_output += chunk
+
+                finish_reason = data["choices"][0].get("finish_reason", "")
+                if finish_reason != "length":
+                    # generation stopped naturally (not truncated)
+                    #print(f"Generation finished at chunk {i+1} with reason: {finish_reason}")
+                    break
+
+                # Append the new chunk to prompt for next iteration to continue from there
+                current_prompt += chunk
+            except Exception as e:
+                print(f"Error during iterative generation at chunk {i+1}: {e}")
+                break
+
+        #print("Raw full_output: ", full_output)
+
+        return full_output
 
     def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
         """
