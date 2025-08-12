@@ -122,7 +122,7 @@ def main():
     os.makedirs(report_dir, exist_ok=True)
 
     full_csv_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.csv')
-    full_json_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.jsonl')
+    full_json_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.json')
     crit_csv_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
     crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
@@ -189,7 +189,7 @@ def main():
                         debug_print(f"[Main] Failed writing full CSV row: {e}")
 
                     try:
-                        f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                        f_json.write(json.dumps(rec, ensure_ascii=False, indent=2) + '\n')
                     except Exception as e:
                         debug_print(f"[Main] Failed writing full JSON line: {e}")
 

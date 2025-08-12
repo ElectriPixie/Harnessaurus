@@ -191,7 +191,7 @@ def run_prompt_test(
     channel_map: Optional[Dict[str, List[str]]] = None,
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
-    loop: bool = True,                # if True: run max_mutations times, else once
+    loop: bool = True,                # if True: run max_mutations times, else once or until accepted
     max_mutations: int = 10,
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
@@ -232,8 +232,7 @@ def run_prompt_test(
         results.append(record)
         return results
 
-    # Run mutation iterations
-    iterations = max_mutations if loop else 1
+    iterations = max_mutations if loop else max_mutations  # we'll handle breaking manually below if loop=False
 
     for mutation_count in range(1, iterations + 1):
         mutated_prompt = pm.process_prompt(clean_prompt)
@@ -248,8 +247,6 @@ def run_prompt_test(
             )
 
         try:
-            #diff = diff_texts(clean_output, mutated_output)
-
             analysis_clean = {}
             analysis_mutated = {}
 
@@ -272,6 +269,13 @@ def run_prompt_test(
             pm.process_log(record)
             results.append(record)
             aggregator.add_record(record)
+
+            # If loop==False, break early if RefusalDetector accepted
+            if not loop:
+                refusal_result = analysis_mutated.get('RefusalDetector', {})
+                if refusal_result.get('status') == 'accepted':
+                    print(f"[run_prompt_test] RefusalDetector accepted at mutation {mutation_count}, breaking loop.")
+                    break
 
         except Exception as e:
             print(f"Error processing record for prompt: {clean_prompt}\n{e}")
