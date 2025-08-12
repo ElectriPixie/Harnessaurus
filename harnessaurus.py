@@ -110,8 +110,9 @@ def main():
     all_records = []
 
 
-    for prompt in prompts:
-        #print(f"[Processing] Prompt {i}/{len(prompts)}...")
+    #for prompt in prompts:
+    for i, prompt in enumerate(prompts, 1):
+        print(f"[Processing] Prompt {i}/{len(prompts)}...")
         recs = run_prompt_test(
             prompt=prompt,  # pass a single prompt string directly
             plugins=plugins,
