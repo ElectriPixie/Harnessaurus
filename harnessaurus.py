@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--max_tokens_per_chunk', type=int, default=256)
     parser.add_argument('--max_iterations', type=int, default=10)
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=True)
 
     args = parser.parse_args()
     DEBUG = args.debug
@@ -130,13 +131,19 @@ def main():
          open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
          open(crit_json_path, 'w', encoding='utf-8') as crit_json:
 
-        full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'mutation_iteration']
+        #full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'mutation_iteration']
+        full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
+
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
 
+#        crit_csv_fields = [
+#            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
+#            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+#        ]
         crit_csv_fields = [
             'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+            'critical_analysis', 'analysis_clean', 'analysis_mutated'
         ]
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
@@ -147,7 +154,6 @@ def main():
             chunk_records = []
 
             for chunk in chunkify(prompt, args.max_tokens_per_chunk):
-                # run_prompt_test returns a list of mutation records for this chunk
                 rec_list = run_prompt_test(
                     chunk,
                     model,
@@ -156,6 +162,7 @@ def main():
                     channel_map=channel_map,
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
+                    include_mutated_output=args.use_mutated,
                 )
 
                 if not isinstance(rec_list, list):
@@ -169,14 +176,13 @@ def main():
                     chunk_records.append(rec)
                     all_records.append(rec)
 
-                    # Write every mutation record immediately to full CSV and JSONL
                     try:
                         writer.writerow({
                             'original_prompt': rec.get('original_prompt', ''),
                             'mutated_prompt': rec.get('mutated_prompt', ''),
                             'clean_output': rec.get('clean_output', ''),
                             'mutated_output': rec.get('mutated_output', ''),
-                            'output_diff': rec.get('output_diff', ''),
+                            #'output_diff': rec.get('output_diff', ''),
                             'mutation_iteration': rec.get('mutation_iteration', ''),
                         })
                     except Exception as e:
@@ -187,17 +193,11 @@ def main():
                     except Exception as e:
                         debug_print(f"[Main] Failed writing full JSON line: {e}")
 
-                    # Check and add critical records
                     try:
                         if critical_filter.is_critical(rec):
                             critical_filter.add_record(rec)
                     except Exception as e:
                         print(f"[Warning] critical_filter failed for a record: {e}")
-
-            # No merge or summarizing here; each mutation is logged individually
-
-        # Write critical records at the end (could write all or just last)
-        # Here we write all critical records found
 
         for crit_rec in critical_filter.critical_records:
             critical_analysis = crit_rec.get('critical_analysis', {}) if isinstance(crit_rec, dict) else {}

@@ -101,39 +101,60 @@ class ResultAggregator:
 
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
-                header = keys
+                header = keys.copy()
                 header += [f"{p}_clean_flagged" for p in plugin_keys]
-                header += [f"{p}_mutated_flagged" for p in plugin_keys]
+
+                include_mutated_columns = any(
+                    r.get('mutated_output') for r in self.records
+                )
+
+                if include_mutated_columns:
+                    header += [f"{p}_mutated_flagged" for p in plugin_keys]
 
                 for p in plugin_keys:
                     for metric in numeric_metrics:
                         header.append(f"{p}_clean_{metric}")
-                for p in plugin_keys:
-                    for metric in numeric_metrics:
-                        header.append(f"{p}_mutated_{metric}")
+                if include_mutated_columns:
+                    for p in plugin_keys:
+                        for metric in numeric_metrics:
+                            header.append(f"{p}_mutated_{metric}")
 
                 writer.writerow(header)
 
                 for r in self.records:
                     row = [r.get(k, '') for k in keys]
 
+                    # clean flagged
                     for p in plugin_keys:
                         row.append(str(r.get('analysis_clean', {}).get(p, {}).get('flagged', False)))
-                    for p in plugin_keys:
-                        row.append(str(r.get('analysis_mutated', {}).get(p, {}).get('flagged', False)))
 
+                    # mutated flagged or blanks
+                    if include_mutated_columns:
+                        if r.get('mutated_output'):
+                            for p in plugin_keys:
+                                row.append(str(r.get('analysis_mutated', {}).get(p, {}).get('flagged', False)))
+                        else:
+                            row.extend([''] * len(plugin_keys))
+
+                    # clean metrics
                     for p in plugin_keys:
                         for metric in numeric_metrics:
                             val = r.get('analysis_clean', {}).get(p, {}).get(metric, '')
                             if isinstance(val, float):
                                 val = f"{val:.4f}"
                             row.append(val)
-                    for p in plugin_keys:
-                        for metric in numeric_metrics:
-                            val = r.get('analysis_mutated', {}).get(p, {}).get(metric, '')
-                            if isinstance(val, float):
-                                val = f"{val:.4f}"
-                            row.append(val)
+
+                    # mutated metrics or blanks
+                    if include_mutated_columns:
+                        if r.get('mutated_output'):
+                            for p in plugin_keys:
+                                for metric in numeric_metrics:
+                                    val = r.get('analysis_mutated', {}).get(p, {}).get(metric, '')
+                                    if isinstance(val, float):
+                                        val = f"{val:.4f}"
+                                    row.append(val)
+                        else:
+                            row.extend([''] * (len(plugin_keys) * len(numeric_metrics)))
 
                     writer.writerow(row)
             print(f"[ResultAggregator] Successfully saved CSV: {filepath}")
