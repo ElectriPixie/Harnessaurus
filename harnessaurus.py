@@ -2,12 +2,11 @@ import argparse
 import os
 import json
 import csv
-import traceback
 from datetime import datetime
 from plugin_loader import load_plugin
 from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
-from harness import GPTModel, run_prompt_test  # <-- import run_prompt_test here
+from harness import GPTModel, run_prompt_test
 
 DEBUG = False
 
@@ -28,6 +27,18 @@ def load_list_from_file(path):
                 raise ValueError(f"{path} must be a JSON array of strings")
         else:
             return [line.strip() for line in f if line.strip()]
+
+# You need to define how you want to chunk prompts.
+# This is a simple placeholder that yields the entire prompt as one chunk.
+def chunkify(prompt, max_tokens_per_chunk):
+    # TODO: Replace with real chunking logic if needed
+    yield prompt
+
+# You need to define how to merge chunk records into one record.
+# This is a placeholder that just returns the last chunk record.
+def merge_chunks(chunk_records):
+    # TODO: Replace with logic that merges chunk records meaningfully
+    return chunk_records[-1] if chunk_records else {}
 
 def main():
     global DEBUG
@@ -136,31 +147,37 @@ def main():
 
         for i, prompt in enumerate(prompts, 1):
             print(f"[Processing] Prompt {i}/{len(prompts)}...")
-            rec = run_prompt_test(
-                prompt,              # prompt_or_prompts
-                model,               # GPTModel instance
-                plugins,             # list of plugins
-                aggregator,          # ResultAggregator instance
-                channel_map=channel_map,
-                max_tokens_per_chunk=args.max_tokens_per_chunk,
-                max_iterations=args.max_iterations,
-            )
-            if critical_filter.is_critical(rec):
-                critical_filter.add_record(rec)
-            all_records.append(rec)
 
-            # Write full record immediately
+            chunk_records = []
+
+            for chunk in chunkify(prompt, args.max_tokens_per_chunk):
+                rec = run_prompt_test(
+                    chunk,
+                    model,
+                    plugins,
+                    aggregator,
+                    channel_map=channel_map,
+                    max_tokens_per_chunk=args.max_tokens_per_chunk,
+                    max_iterations=args.max_iterations,
+                )
+                chunk_records.append(rec)
+                all_records.append(rec)
+
+                if critical_filter.is_critical(rec):
+                    critical_filter.add_record(rec)
+
+            final_rec = merge_chunks(chunk_records)
+
             writer.writerow({
-                'original_prompt': rec['original_prompt'],
-                'mutated_prompt': rec['mutated_prompt'],
-                'clean_output': rec['clean_output'],
-                'mutated_output': rec['mutated_output'],
-                'output_diff': rec['output_diff'],
+                'original_prompt': final_rec.get('original_prompt', ''),
+                'mutated_prompt': final_rec.get('mutated_prompt', ''),
+                'clean_output': final_rec.get('clean_output', ''),
+                'mutated_output': final_rec.get('mutated_output', ''),
+                'output_diff': final_rec.get('output_diff', ''),
             })
-            f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
+            f_json.write(json.dumps(final_rec, ensure_ascii=False) + '\n')
 
-            # Write critical record immediately if critical
-            if critical_filter.critical_records:
+            if any(critical_filter.is_critical(r) for r in chunk_records):
                 crit_rec = critical_filter.critical_records[-1]  # last added
                 row = crit_rec.copy()
                 row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
@@ -170,13 +187,13 @@ def main():
                 crit_writer.writerow(filtered_row)
                 crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
 
-    print(f"[Saved] Full CSV: {full_csv_path}")
-    print(f"[Saved] Full JSON: {full_json_path}")
-    print(f"[Saved] Critical CSV: {crit_csv_path}")
-    print(f"[Saved] Critical JSON: {crit_json_path}")
+        print(f"[Saved] Full CSV: {full_csv_path}")
+        print(f"[Saved] Full JSON: {full_json_path}")
+        print(f"[Saved] Critical CSV: {crit_csv_path}")
+        print(f"[Saved] Critical JSON: {crit_json_path}")
 
-    print("\n=== SUMMARY ===")
-    print(json.dumps(aggregator.generate_summary(), indent=2))
+        print("\n=== SUMMARY ===")
+        print(json.dumps(aggregator.generate_summary(), indent=2))
 
 
 if __name__ == '__main__':

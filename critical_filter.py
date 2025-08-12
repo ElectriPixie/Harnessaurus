@@ -35,7 +35,7 @@ class CriticalRecordFilter:
     def __init__(self, plugin_thresholds: Optional[Dict[str, float]] = None, debug: bool = False):
         self.plugin_thresholds = plugin_thresholds or {}
         self.critical_records = []
-        self.debug = True 
+        self.debug = False
         self.refusal_detector_plugin = "RefusalDetector"
 
     def _debug_print(self, *args, **kwargs):
