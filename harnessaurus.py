@@ -126,25 +126,20 @@ def main():
     crit_csv_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
     crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
+    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
+    crit_csv_fields = [
+        'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
+        'critical_analysis', 'analysis_clean', 'analysis_mutated'
+    ]
+
     with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
          open(full_json_path, 'w', encoding='utf-8') as f_json, \
          open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
          open(crit_json_path, 'w', encoding='utf-8') as crit_json:
 
-        #full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'mutation_iteration']
-        full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
-
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
 
-#        crit_csv_fields = [
-#            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-#            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
-#        ]
-        crit_csv_fields = [
-            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-            'critical_analysis', 'analysis_clean', 'analysis_mutated'
-        ]
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
 
@@ -183,7 +178,6 @@ def main():
                             'mutated_prompt': rec.get('mutated_prompt', ''),
                             'clean_output': rec.get('clean_output', ''),
                             'mutated_output': rec.get('mutated_output', ''),
-                            #'output_diff': rec.get('output_diff', ''),
                             'mutation_iteration': rec.get('mutation_iteration', ''),
                         })
                     except Exception as e:
@@ -197,40 +191,41 @@ def main():
                     try:
                         if critical_filter.is_critical(rec):
                             critical_filter.add_record(rec)
+                            enriched_rec = critical_filter.critical_records[-1]
+
+                            critical_analysis = enriched_rec.get('critical_analysis', {})
+                            analysis_clean = critical_analysis.get('analysis_clean', {})
+                            analysis_mutated = critical_analysis.get('analysis_mutated', {})
+
+                            row = enriched_rec.copy()
+                            try:
+                                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False, indent=2)
+                            except Exception:
+                                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False)
+
+                            try:
+                                row['analysis_clean'] = json.dumps(analysis_clean, ensure_ascii=False)
+                            except Exception:
+                                row['analysis_clean'] = ''
+
+                            try:
+                                row['analysis_mutated'] = json.dumps(analysis_mutated, ensure_ascii=False)
+                            except Exception:
+                                row['analysis_mutated'] = ''
+
+                            filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+                            try:
+                                crit_writer.writerow(filtered_row)
+                            except Exception as e:
+                                debug_print(f"[Main] Failed writing critical CSV row: {e}")
+
+                            try:
+                                crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + '\n')
+                            except Exception as e:
+                                debug_print(f"[Main] Failed writing critical JSON entry: {e}")
+
                     except Exception as e:
                         print(f"[Warning] critical_filter failed for a record: {e}")
-
-        for crit_rec in critical_filter.critical_records:
-            critical_analysis = crit_rec.get('critical_analysis', {}) if isinstance(crit_rec, dict) else {}
-            analysis_clean = critical_analysis.get('analysis_clean', {}) if isinstance(critical_analysis, dict) else {}
-            analysis_mutated = critical_analysis.get('analysis_mutated', {}) if isinstance(critical_analysis, dict) else {}
-
-            row = crit_rec.copy()
-            try:
-                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False, indent=2)
-            except Exception:
-                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False)
-
-            try:
-                row['analysis_clean'] = json.dumps(analysis_clean, ensure_ascii=False)
-            except Exception:
-                row['analysis_clean'] = ''
-
-            try:
-                row['analysis_mutated'] = json.dumps(analysis_mutated, ensure_ascii=False)
-            except Exception:
-                row['analysis_mutated'] = ''
-
-            filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
-            try:
-                crit_writer.writerow(filtered_row)
-            except Exception as e:
-                debug_print(f"[Main] Failed writing critical CSV row: {e}")
-
-            try:
-                crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
-            except Exception as e:
-                debug_print(f"[Main] Failed writing critical JSON entry: {e}")
 
         print(f"[Saved] Full CSV: {full_csv_path}")
         print(f"[Saved] Full JSON: {full_json_path}")
