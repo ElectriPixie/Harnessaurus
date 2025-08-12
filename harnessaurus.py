@@ -163,10 +163,9 @@ def main():
                 chunk_records.append(rec)
                 all_records.append(rec)
 
-                if critical_filter.is_critical(rec):
-                    critical_filter.add_record(rec)
-
             final_rec = merge_chunks(chunk_records)
+            if critical_filter.is_critical(final_rec):
+                critical_filter.add_record(final_rec)
 
             writer.writerow({
                 'original_prompt': final_rec.get('original_prompt', ''),
