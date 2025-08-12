@@ -166,7 +166,7 @@ def run_prompt_test(
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
     loop: bool = True, #run_prompt_test function that loops exactly max_mutations times if loop is True
-    max_mutations: int = 20,
+    max_mutations: int = 10,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
