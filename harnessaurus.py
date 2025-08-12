@@ -28,16 +28,12 @@ def load_list_from_file(path):
         else:
             return [line.strip() for line in f if line.strip()]
 
-# You need to define how you want to chunk prompts.
-# This is a simple placeholder that yields the entire prompt as one chunk.
+# Placeholder: yields whole prompt as one chunk
 def chunkify(prompt, max_tokens_per_chunk):
-    # TODO: Replace with real chunking logic if needed
     yield prompt
 
-# You need to define how to merge chunk records into one record.
-# This is a placeholder that just returns the last chunk record.
+# Placeholder: just returns last chunk record
 def merge_chunks(chunk_records):
-    # TODO: Replace with logic that merges chunk records meaningfully
     return chunk_records[-1] if chunk_records else {}
 
 def main():
@@ -72,6 +68,7 @@ def main():
     parser.add_argument('--max_tokens_per_chunk', type=int, default=256)
     parser.add_argument('--max_iterations', type=int, default=10)
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=True)
 
     args = parser.parse_args()
     DEBUG = args.debug
@@ -134,13 +131,19 @@ def main():
          open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
          open(crit_json_path, 'w', encoding='utf-8') as crit_json:
 
-        full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff']
+        #full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'mutation_iteration']
+        full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
+
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
 
+#        crit_csv_fields = [
+#            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
+#            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+#        ]
         crit_csv_fields = [
             'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+            'critical_analysis', 'analysis_clean', 'analysis_mutated'
         ]
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
@@ -151,7 +154,7 @@ def main():
             chunk_records = []
 
             for chunk in chunkify(prompt, args.max_tokens_per_chunk):
-                rec = run_prompt_test(
+                rec_list = run_prompt_test(
                     chunk,
                     model,
                     plugins,
@@ -159,32 +162,74 @@ def main():
                     channel_map=channel_map,
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
+                    include_mutated_output=args.use_mutated,
                 )
-                chunk_records.append(rec)
-                all_records.append(rec)
 
-            final_rec = merge_chunks(chunk_records)
-            if critical_filter.is_critical(final_rec):
-                critical_filter.add_record(final_rec)
+                if not isinstance(rec_list, list):
+                    raise TypeError(f"Unexpected return type from run_prompt_test: {type(rec_list)}")
 
-            writer.writerow({
-                'original_prompt': final_rec.get('original_prompt', ''),
-                'mutated_prompt': final_rec.get('mutated_prompt', ''),
-                'clean_output': final_rec.get('clean_output', ''),
-                'mutated_output': final_rec.get('mutated_output', ''),
-                'output_diff': final_rec.get('output_diff', ''),
-            })
-            f_json.write(json.dumps(final_rec, ensure_ascii=False) + '\n')
+                for rec in rec_list:
+                    if not isinstance(rec, dict):
+                        debug_print(f"[Main] Skipping non-dict record: {type(rec)}")
+                        continue
 
-            if any(critical_filter.is_critical(r) for r in chunk_records):
-                crit_rec = critical_filter.critical_records[-1]  # last added
-                row = crit_rec.copy()
-                row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
-                row['analysis_clean'] = json.dumps(row.get('analysis_clean', {}), ensure_ascii=False)
-                row['analysis_mutated'] = json.dumps(row.get('analysis_mutated', {}), ensure_ascii=False)
-                filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+                    chunk_records.append(rec)
+                    all_records.append(rec)
+
+                    try:
+                        writer.writerow({
+                            'original_prompt': rec.get('original_prompt', ''),
+                            'mutated_prompt': rec.get('mutated_prompt', ''),
+                            'clean_output': rec.get('clean_output', ''),
+                            'mutated_output': rec.get('mutated_output', ''),
+                            #'output_diff': rec.get('output_diff', ''),
+                            'mutation_iteration': rec.get('mutation_iteration', ''),
+                        })
+                    except Exception as e:
+                        debug_print(f"[Main] Failed writing full CSV row: {e}")
+
+                    try:
+                        f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                    except Exception as e:
+                        debug_print(f"[Main] Failed writing full JSON line: {e}")
+
+                    try:
+                        if critical_filter.is_critical(rec):
+                            critical_filter.add_record(rec)
+                    except Exception as e:
+                        print(f"[Warning] critical_filter failed for a record: {e}")
+
+        for crit_rec in critical_filter.critical_records:
+            critical_analysis = crit_rec.get('critical_analysis', {}) if isinstance(crit_rec, dict) else {}
+            analysis_clean = critical_analysis.get('analysis_clean', {}) if isinstance(critical_analysis, dict) else {}
+            analysis_mutated = critical_analysis.get('analysis_mutated', {}) if isinstance(critical_analysis, dict) else {}
+
+            row = crit_rec.copy()
+            try:
+                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False, indent=2)
+            except Exception:
+                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False)
+
+            try:
+                row['analysis_clean'] = json.dumps(analysis_clean, ensure_ascii=False)
+            except Exception:
+                row['analysis_clean'] = ''
+
+            try:
+                row['analysis_mutated'] = json.dumps(analysis_mutated, ensure_ascii=False)
+            except Exception:
+                row['analysis_mutated'] = ''
+
+            filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+            try:
                 crit_writer.writerow(filtered_row)
+            except Exception as e:
+                debug_print(f"[Main] Failed writing critical CSV row: {e}")
+
+            try:
                 crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
+            except Exception as e:
+                debug_print(f"[Main] Failed writing critical JSON entry: {e}")
 
         print(f"[Saved] Full CSV: {full_csv_path}")
         print(f"[Saved] Full JSON: {full_json_path}")
@@ -193,7 +238,6 @@ def main():
 
         print("\n=== SUMMARY ===")
         print(json.dumps(aggregator.generate_summary(), indent=2))
-
 
 if __name__ == '__main__':
     main()
