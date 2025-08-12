@@ -157,7 +157,6 @@ def safe_plugin_result(analysis_dict, plugin_name, index, default=None):
             return plugin_results[index]
     return default
 
-
 def run_prompt_test(
     prompt: str,
     model: GPTModel,
@@ -166,46 +165,56 @@ def run_prompt_test(
     channel_map: Optional[Dict[str, List[str]]] = None,
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
+    loop: bool = True, #run_prompt_test function that loops exactly max_mutations times if loop is True
+    max_mutations: int = 20,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
-    clean_prompt = prompt
-    mutated_prompt = pm.process_prompt(clean_prompt)
-    #print("prompt: ", clean_prompt)
-    clean_output = model.infer_iterative(clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
-    #print("mutated prompt: ", mutated_prompt)
-    mutated_output = model.infer_iterative(mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations)
-
     results = []
+    clean_prompt = prompt
 
-    try:
-        diff = diff_texts(clean_output, mutated_output)
+    # Run clean inference once before loop
+    clean_output = model.infer_iterative(
+        clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+    )
 
-        analysis_clean = {}
-        analysis_mutated = {}
+    iterations = max_mutations if loop else 1
 
-        for plugin in plugins:
-            plugin_name = type(plugin).__name__
-            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
-            analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
+    for mutation_count in range(1, iterations + 1):
+        mutated_prompt = pm.process_prompt(clean_prompt)
+        mutated_output = model.infer_iterative(
+            mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+        )
 
-        record = {
-            'original_prompt': clean_prompt,
-            'mutated_prompt': mutated_prompt,
-            'clean_output': clean_output,
-            'mutated_output': mutated_output,
-            'analysis_clean': analysis_clean,
-            'analysis_mutated': analysis_mutated,
-            'output_diff': diff,
-        }
+        try:
+            diff = diff_texts(clean_output, mutated_output)
 
-        pm.process_log(record)
-        results.append(record)
-    except Exception as e:
-        print(f"Error processing record for prompt: {clean_prompt}\n{e}")
-        traceback.print_exc()
+            analysis_clean = {}
+            analysis_mutated = {}
 
-    for rec in results:
-        aggregator.add_record(rec)
+            for plugin in plugins:
+                plugin_name = type(plugin).__name__
+                analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+                analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
+
+            record = {
+                'original_prompt': clean_prompt,
+                'mutated_prompt': mutated_prompt,
+                'clean_output': clean_output,
+                'mutated_output': mutated_output,
+                'analysis_clean': analysis_clean,
+                'analysis_mutated': analysis_mutated,
+                'output_diff': diff,
+                'mutation_iteration': mutation_count,
+            }
+
+            pm.process_log(record)
+            results.append(record)
+            aggregator.add_record(record)
+
+        except Exception as e:
+            print(f"Error processing record for prompt: {clean_prompt}\n{e}")
+            traceback.print_exc()
+            break
 
     return results
