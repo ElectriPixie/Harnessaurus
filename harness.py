@@ -48,6 +48,7 @@ def split_into_channels(text: str) -> Dict[str, str]:
         channels[channel_name] = content
     return channels
 
+
 def flip_negation(text):
     patterns = [
         (r"\bdo not\b", "do"),
@@ -60,9 +61,11 @@ def flip_negation(text):
         (r"\bwon't\b", "will"),
     ]
     for pat, repl in patterns:
-        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+        new_text, count = re.subn(pat, repl, text, flags=re.IGNORECASE)
+        if count > 0:
+            print(f"[flip_negation] Replaced '{pat}' with '{repl}' {count} time(s). \nOld Text: {text}\nResult: {new_text}")
+            text = new_text
     return text
-
 
 
 class GPTModel:
@@ -72,7 +75,7 @@ class GPTModel:
         self.model_name = model_name
         self.max_context_chars = max_context_chars  # rough max prompt length in chars
     
-    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
+    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 20, flip_negotiate: int = 1,) -> str:
         """
         Generate text iteratively by feeding back output until
         the model finishes or max_iterations is reached.
@@ -106,7 +109,10 @@ class GPTModel:
                     break
 
                 # Append the new chunk to prompt for next iteration to continue from there
-                current_prompt += flip_negation(chunk)
+                if(flip_negotiate):
+                    current_prompt += flip_negation(chunk)
+                else:
+                    current_prompt += chunk
             except Exception as e:
                 print(f"Error during iterative generation at chunk {i+1}: {e}")
                 break
@@ -232,7 +238,8 @@ def run_prompt_test(
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
     loop: bool = True, #run_prompt_test function that loops exactly max_mutations times if loop is True
-    max_mutations: int = 5,
+    max_mutations: int = 10,
+    iterator: int = 1,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -240,18 +247,27 @@ def run_prompt_test(
     clean_prompt = prompt
 
     # Run clean inference once before loop
-    clean_output = model.infer_iterative_exploit(
-        clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
-    )
+    if(iterator == 1):
+        clean_output = model.infer_iterative(
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+        )
+    if(iterator == 2):
+        clean_output = model.infer_iterative_exploit(
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+        )
 
     iterations = max_mutations if loop else 1
 
     for mutation_count in range(1, iterations + 1):
         mutated_prompt = pm.process_prompt(clean_prompt)
-        mutated_output = model.infer_iterative_exploit(
-            mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
-        )
-
+        if(iterator == 1):
+            mutated_output = model.infer_iterative(
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            )
+        if(iterator == 2):
+            mutated_output = model.infer_iterative_exploit(
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            )
         try:
             diff = diff_texts(clean_output, mutated_output)
 
