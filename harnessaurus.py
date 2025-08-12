@@ -151,7 +151,8 @@ def main():
             chunk_records = []
 
             for chunk in chunkify(prompt, args.max_tokens_per_chunk):
-                rec = run_prompt_test(
+                # run_prompt_test returns either a single dict or a list of dicts (it currently returns a list)
+                rec_result = run_prompt_test(
                     chunk,
                     model,
                     plugins,
@@ -160,32 +161,90 @@ def main():
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
                 )
-                chunk_records.append(rec)
-                all_records.append(rec)
 
-                if critical_filter.is_critical(rec):
-                    critical_filter.add_record(rec)
+                # Normalize to a list of dicts
+                if isinstance(rec_result, dict):
+                    rec_list = [rec_result]
+                elif isinstance(rec_result, list):
+                    rec_list = rec_result
+                else:
+                    raise TypeError(f"Unexpected return type from run_prompt_test: {type(rec_result)}")
 
+                # Append each individual record and run critical checks on each
+                for rec in rec_list:
+                    if not isinstance(rec, dict):
+                        debug_print(f"[Main] Skipping non-dict record: {type(rec)}")
+                        continue
+                    chunk_records.append(rec)
+                    all_records.append(rec)
+
+                    try:
+                        if critical_filter.is_critical(rec):
+                            critical_filter.add_record(rec)
+                    except Exception as e:
+                        # If something odd happens inside filter, don't crash the whole run;
+                        # log and continue.
+                        print(f"[Warning] critical_filter failed for a record: {e}")
+
+            # merge_chunks expects a list of chunk_records; keep that contract.
             final_rec = merge_chunks(chunk_records)
 
-            writer.writerow({
-                'original_prompt': final_rec.get('original_prompt', ''),
-                'mutated_prompt': final_rec.get('mutated_prompt', ''),
-                'clean_output': final_rec.get('clean_output', ''),
-                'mutated_output': final_rec.get('mutated_output', ''),
-                'output_diff': final_rec.get('output_diff', ''),
-            })
-            f_json.write(json.dumps(final_rec, ensure_ascii=False) + '\n')
+            # Write full CSV/JSON lines for the merged final record
+            try:
+                writer.writerow({
+                    'original_prompt': final_rec.get('original_prompt', ''),
+                    'mutated_prompt': final_rec.get('mutated_prompt', ''),
+                    'clean_output': final_rec.get('clean_output', ''),
+                    'mutated_output': final_rec.get('mutated_output', ''),
+                    'output_diff': final_rec.get('output_diff', ''),
+                })
+            except Exception as e:
+                debug_print(f"[Main] Failed writing full CSV row for prompt {i}: {e}")
 
+            try:
+                f_json.write(json.dumps(final_rec, ensure_ascii=False) + '\n')
+            except Exception as e:
+                debug_print(f"[Main] Failed writing full JSON line for prompt {i}: {e}")
+
+            # If any chunk record for this prompt produced a critical finding,
+            # write the last critical record to the critical CSV/JSON.
             if any(critical_filter.is_critical(r) for r in chunk_records):
-                crit_rec = critical_filter.critical_records[-1]  # last added
-                row = crit_rec.copy()
-                row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
-                row['analysis_clean'] = json.dumps(row.get('analysis_clean', {}), ensure_ascii=False)
-                row['analysis_mutated'] = json.dumps(row.get('analysis_mutated', {}), ensure_ascii=False)
-                filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
-                crit_writer.writerow(filtered_row)
-                crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
+                # Safely get the last critical record stored
+                crit_rec = critical_filter.critical_records[-1] if critical_filter.critical_records else None
+                if crit_rec:
+                    # The CriticalRecordFilter stores 'critical_analysis' inside the stored record;
+                    # extract analysis_clean/analysis_mutated from it for CSV fields expected earlier.
+                    critical_analysis = crit_rec.get('critical_analysis', {}) if isinstance(crit_rec, dict) else {}
+                    analysis_clean = critical_analysis.get('analysis_clean', {}) if isinstance(critical_analysis, dict) else {}
+                    analysis_mutated = critical_analysis.get('analysis_mutated', {}) if isinstance(critical_analysis, dict) else {}
+
+                    row = crit_rec.copy()
+                    try:
+                        row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False, indent=2)
+                    except Exception:
+                        row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False)
+
+                    # Ensure the CSV fields exist and are JSON strings
+                    try:
+                        row['analysis_clean'] = json.dumps(analysis_clean, ensure_ascii=False)
+                    except Exception:
+                        row['analysis_clean'] = ''
+
+                    try:
+                        row['analysis_mutated'] = json.dumps(analysis_mutated, ensure_ascii=False)
+                    except Exception:
+                        row['analysis_mutated'] = ''
+
+                    filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+                    try:
+                        crit_writer.writerow(filtered_row)
+                    except Exception as e:
+                        debug_print(f"[Main] Failed writing critical CSV row: {e}")
+
+                    try:
+                        crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
+                    except Exception as e:
+                        debug_print(f"[Main] Failed writing critical JSON entry: {e}")
 
         print(f"[Saved] Full CSV: {full_csv_path}")
         print(f"[Saved] Full JSON: {full_json_path}")
