@@ -192,7 +192,7 @@ def run_prompt_test(
     max_tokens_per_chunk: int = 256,
     max_iterations: int = 10,
     loop: bool = True,                # if True: run max_mutations times, else once or until accepted
-    max_mutations: int = 10,
+    max_mutations: int = 5,
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
 ) -> List[dict]:
