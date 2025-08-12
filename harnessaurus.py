@@ -107,29 +107,6 @@ def main():
         'EvaluationAwarenessDetector': [],
     }
 
-    all_records = []
-
-
-    #for prompt in prompts:
-    for i, prompt in enumerate(prompts, 1):
-        print(f"[Processing] Prompt {i}/{len(prompts)}...")
-        recs = run_prompt_test(
-            prompt=prompt,  # pass a single prompt string directly
-            plugins=plugins,
-            model=model,
-            aggregator=aggregator,
-            channel_map=channel_map,
-            max_tokens_per_chunk=args.max_tokens_per_chunk,
-            max_iterations=args.max_iterations,
-        )
-        #print(json.dumps(recs, indent=2, ensure_ascii=False))
-        all_records.extend(recs)
-
-
-        for r in recs:
-            if critical_filter.is_critical(r):
-                critical_filter.add_record(r)
-
     report_dir = "reports"
     os.makedirs(report_dir, exist_ok=True)
 
@@ -139,44 +116,69 @@ def main():
     crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
 
     with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
-         open(full_json_path, 'w', encoding='utf-8') as f_json:
+         open(full_json_path, 'w', encoding='utf-8') as f_json, \
+         open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
+         open(crit_json_path, 'w', encoding='utf-8') as crit_json:
 
         full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff']
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
 
-        for rec in all_records:
-            writer.writerow({
-                'original_prompt': rec['original_prompt'],
-                'mutated_prompt': rec['mutated_prompt'],
-                'clean_output': rec['clean_output'],
-                'mutated_output': rec['mutated_output'],
-                'output_diff': rec['output_diff'],
-            })
-            f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        crit_csv_fields = [
+            'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
+            'output_diff', 'critical_analysis', 'analysis_clean', 'analysis_mutated'
+        ]
+        crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
+        crit_writer.writeheader()
 
-    if critical_filter.critical_records:
-        with open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
-             open(crit_json_path, 'w', encoding='utf-8') as crit_json:
+        for i, prompt in enumerate(prompts, 1):
+            print(f"[Processing] Prompt {i}/{len(prompts)}...")
+            recs = run_prompt_test(
+                prompt=prompt,  # pass a single prompt string directly
+                plugins=plugins,
+                model=model,
+                aggregator=aggregator,
+                channel_map=channel_map,
+                max_tokens_per_chunk=args.max_tokens_per_chunk,
+                max_iterations=args.max_iterations,
+            )
 
-            crit_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'output_diff', 'critical_analysis']
-            crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
-            crit_writer.writeheader()
+            print(f"[Debug] run_prompt_test returned {len(recs)} records for prompt {i}")
 
-            for crit_rec in critical_filter.critical_records:
-                row = crit_rec.copy()
-                row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
-                crit_writer.writerow(row)
-                crit_json.write(json.dumps(crit_rec, ensure_ascii=False, indent=2) + '\n')
+            for rec in recs:
+                try:
+                    if critical_filter.is_critical(rec):
+                        critical_filter.add_record(rec)
 
-    print(f"[Saved] Full CSV: {full_csv_path}")
-    print(f"[Saved] Full JSON: {full_json_path}")
-    print(f"[Saved] Critical CSV: {crit_csv_path}")
-    print(f"[Saved] Critical JSON: {crit_json_path}")
+                        row = rec.copy()
+                        row['critical_analysis'] = json.dumps(row.get('critical_analysis', {}), ensure_ascii=False, indent=2)
+                        row['analysis_clean'] = json.dumps(row.get('analysis_clean', {}), ensure_ascii=False)
+                        row['analysis_mutated'] = json.dumps(row.get('analysis_mutated', {}), ensure_ascii=False)
+                        filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
+                        crit_writer.writerow(filtered_row)
+                        crit_json.write(json.dumps(rec, ensure_ascii=False, indent=2) + '\n')
 
-    print("\n=== SUMMARY ===")
-    print(json.dumps(aggregator.generate_summary(), indent=2))
+                    writer.writerow({
+                        'original_prompt': rec.get('original_prompt', ''),
+                        'mutated_prompt': rec.get('mutated_prompt', ''),
+                        'clean_output': rec.get('clean_output', ''),
+                        'mutated_output': rec.get('mutated_output', ''),
+                        'output_diff': rec.get('output_diff', ''),
+                    })
+                    f_json.write(json.dumps(rec, ensure_ascii=False) + '\n')
 
+                except Exception as e:
+                    print(f"[Error] Exception processing record: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        print(f"[Saved] Full CSV: {full_csv_path}")
+        print(f"[Saved] Full JSON: {full_json_path}")
+        print(f"[Saved] Critical CSV: {crit_csv_path}")
+        print(f"[Saved] Critical JSON: {crit_json_path}")
+
+        print("\n=== SUMMARY ===")
+        print(json.dumps(aggregator.generate_summary(), indent=2))
 
 if __name__ == '__main__':
     main()
