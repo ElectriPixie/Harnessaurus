@@ -12,7 +12,7 @@ app = FastAPI()
 
 # --- Configurable parameters ---
 model_id = "/data/AI/Models/gpt-oss-20b"
-MAX_TOKENS = 256  # max tokens for generation
+MAX_TOKENS = 256
 
 print("Loading model and tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -22,21 +22,23 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
 )
 
-# --- Request model for OpenAI-style API ---
+# Store last prompt/output for CoT display
+last_prompt = None
+last_outputs = None
+
+# --- FastAPI OpenAI-style API ---
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list
     max_tokens: int = MAX_TOKENS
 
-# --- API endpoint ---
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
+    global last_prompt, last_outputs
     user_message = req.messages[-1]["content"]
 
-    # Tokenize input
     inputs = tokenizer(user_message, return_tensors="pt").to(model.device)
 
-    # Generate text with attentions and hidden states
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -50,38 +52,20 @@ async def chat_completions(req: ChatCompletionRequest):
             return_dict_in_generate=True,
         )
 
-    # Decode generated text
     generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
-
-    # Trim repeated prompt
     if generated_text.startswith(user_message):
         generated_text = generated_text[len(user_message):].strip()
 
-    # Convert attentions and hidden states to shapes for lightweight info
-    # (avoid returning full tensors unless you want huge JSON)
-    attention_shapes = [
-        tuple(layer.shape) for layer in outputs.attentions[0]  # first generation step
-    ]
-    hidden_state_shapes = [
-        tuple(layer.shape) for layer in outputs.hidden_states[0]  # first generation step
-    ]
+    # Save last prompt and outputs for CoT display
+    last_prompt = user_message
+    last_outputs = outputs
 
     return {
         "id": "local-chat-1",
         "object": "chat.completion",
         "created": 0,
         "model": req.model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": generated_text},
-                "finish_reason": "stop",
-            }
-        ],
-        "analysis": {
-            "attention_shapes": attention_shapes,
-            "hidden_state_shapes": hidden_state_shapes,
-        },
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": generated_text}, "finish_reason": "stop"}],
         "usage": {
             "prompt_tokens": len(user_message.split()),
             "completion_tokens": len(generated_text.split()),
@@ -94,8 +78,9 @@ async def chat_completions(req: ChatCompletionRequest):
 async def root():
     return RedirectResponse(url="/gradio")
 
-# --- Gradio UI ---
+# --- Gradio UI functions ---
 def generate_text(prompt):
+    global last_prompt, last_outputs
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         outputs = model.generate(
@@ -112,23 +97,38 @@ def generate_text(prompt):
     generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
     if generated_text.startswith(prompt):
         generated_text = generated_text[len(prompt):].strip()
+
+    last_prompt = prompt
+    last_outputs = outputs
+
     return generated_text
 
-iface = gr.Interface(
-    fn=generate_text,
-    inputs=gr.Textbox(lines=5, label="Enter prompt"),
-    outputs=gr.Textbox(lines=15, label="Generated text"),
-    title="GPT-OSS-20B Text Generation",
-)
+def get_cot_details():
+    if last_outputs is None:
+        return "No CoT data available. Generate text first."
+    
+    # Convert tensors to lists for JSON-friendly display
+    attention_shapes = [[list(layer.shape) for layer in step] for step in last_outputs.attentions]
+    hidden_state_shapes = [[list(layer.shape) for layer in step] for step in last_outputs.hidden_states]
+
+    return f"Prompt: {last_prompt}\n\nAttention shapes: {attention_shapes}\n\nHidden state shapes: {hidden_state_shapes}"
+
+# --- Gradio interface ---
+with gr.Blocks() as iface:
+    gr.Markdown("# GPT-OSS-20B Text Generation")
+    
+    txt_input = gr.Textbox(lines=5, label="Enter prompt")
+    txt_output = gr.Textbox(lines=15, label="Generated text")
+    btn_generate = gr.Button("Generate")
+    btn_cot = gr.Button("See CoT / Analysis")
+    cot_output = gr.Textbox(lines=20, label="Chain of Thought / Analysis")
+
+    btn_generate.click(fn=generate_text, inputs=txt_input, outputs=txt_output)
+    btn_cot.click(fn=get_cot_details, inputs=None, outputs=cot_output)
 
 # --- Run Gradio in separate thread ---
 def run_gradio():
-    iface.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        prevent_thread_lock=True,
-    )
+    iface.launch(server_name="0.0.0.0", server_port=7860, share=False, prevent_thread_lock=True)
 
 threading.Thread(target=run_gradio, daemon=True).start()
 
