@@ -158,7 +158,7 @@ def main():
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
                     include_mutated_output=args.use_mutated,
-                    iterator=2
+                    iterator=1
                 )
 
                 if not isinstance(rec_list, list):
