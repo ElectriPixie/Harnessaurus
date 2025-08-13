@@ -4,7 +4,7 @@ import requests
 # --- Config ---
 SERVER_URL = "http://localhost:6589"
 MODEL_NAME = "gpt-oss-20b"
-MAX_TOKENS = 4096
+MAX_TOKENS = 256
 
 # --- Helper to call the FastAPI server ---
 def query_api(prompt):

@@ -8,6 +8,15 @@ import torch
 import uvicorn
 import time
 import os
+import uuid
+import hashlib
+import argparse
+
+# --- CLI arguments ---
+parser = argparse.ArgumentParser(description="OpenAI-style server with optional multi-chunk mode")
+parser.add_argument("--multi_chunk", action="store_true", help="Enable multi-chunk generation by default")
+parser.add_argument("--port", type=int, default=6589, help="Server port")
+args = parser.parse_args()
 
 # --- Logging setup ---
 os.makedirs("logs", exist_ok=True)
@@ -24,7 +33,9 @@ app = FastAPI()
 # --- Config ---
 MODEL_ID = "/data/AI/Models/gpt-oss-20b"
 MAX_TOKENS = 4096
+CHUNK_SIZE = 1024
 NUM_THREADS = 4
+DEFAULT_MULTI_CHUNK = args.multi_chunk
 
 # --- Load model & tokenizer ---
 logger.info("Loading model and tokenizer...")
@@ -34,99 +45,152 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype="auto",
     device_map="auto",
 )
-logger.info("Model loaded successfully on device %s", next(model.parameters()).device)
+logger.info("Model loaded on device %s", next(model.parameters()).device)
 
 # --- Threaded job queue ---
 job_queue = Queue()
 results = {}
-lock = threading.Lock()  # protect results dict in multi-thread
+lock = threading.Lock()
 
 def model_worker():
     while True:
-        job_id, prompt, max_tokens = job_queue.get()
-        if job_id is None:
+        job = job_queue.get()
+        if job is None:
             break
-
+        job_id, prompt, max_tokens, multi_chunk, request_id = job
         start_time = time.time()
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        analysis_text = ""
+        try:
+            if multi_chunk:
+                context = prompt
+                full_text = ""
+                tokens_generated = 0
+                while tokens_generated < max_tokens:
+                    inputs = tokenizer(context, return_tensors="pt").to(model.device)
+                    with torch.no_grad():
+                        outputs = model.generate(
+                            **inputs,
+                            max_new_tokens=min(CHUNK_SIZE, max_tokens - tokens_generated),
+                            do_sample=True,
+                            temperature=0.7,
+                            top_k=50,
+                            top_p=0.95,
+                            return_dict_in_generate=True,
+                        )
+                    chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
+                    if chunk.startswith(context):
+                        chunk = chunk[len(context):].strip()
+                    # Append to full text
+                    full_text += " " + chunk
+                    # Append to analysis
+                    analysis_text += f"Chunk {tokens_generated // CHUNK_SIZE + 1} generated {len(chunk.split())} tokens.\n"
+                    tokens_generated += len(chunk.split())
+                    context += " " + chunk
+                    if len(chunk.split()) < min(CHUNK_SIZE, max_tokens - tokens_generated):
+                        break
+                generated_text = full_text.strip()
+            else:
+                inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+                with torch.no_grad():
+                    outputs = model.generate(
+                        **inputs,
+                        max_new_tokens=max_tokens,
+                        do_sample=True,
+                        temperature=0.7,
+                        top_k=50,
+                        top_p=0.95,
+                        return_dict_in_generate=True,
+                    )
+                generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
+                if generated_text.startswith(prompt):
+                    generated_text = generated_text[len(prompt):].strip()
+                analysis_text += f"Single-chunk generated {len(generated_text.split())} tokens.\n"
 
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=True,
-                temperature=0.7,
-                top_k=50,
-                top_p=0.95,
-                return_dict_in_generate=True,
+            finish_reason = "length" if len(generated_text.split()) >= max_tokens else "stop"
+            duration = time.time() - start_time
+
+            with lock:
+                results[job_id] = {
+                    "text": f"<|channel|>analysis<|message|>{analysis_text.strip()}\n<|channel|>final<|message|>{generated_text}",
+                    "finish_reason": finish_reason,
+                    "duration": duration,
+                    "prompt_length": len(prompt.split()),
+                    "completion_length": len(generated_text.split()),
+                    "device": str(model.device),
+                    "request_id": request_id,
+                    "multi_chunk": multi_chunk,
+                }
+
+            logger.info(
+                "Job %s completed in %.2fs on device %s | Prompt tokens: %d | Completion tokens: %d | Finish reason: %s | Request ID: %s | Multi-chunk: %s",
+                job_id,
+                duration,
+                model.device,
+                len(prompt.split()),
+                len(generated_text.split()),
+                finish_reason,
+                request_id,
+                multi_chunk,
             )
 
-        generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
-        if generated_text.startswith(prompt):
-            generated_text = generated_text[len(prompt):].strip()
+        except Exception as e:
+            logger.exception("Error generating output for job %s | Request ID: %s | Prompt: %s", job_id, request_id, prompt)
+            with lock:
+                results[job_id] = {
+                    "text": f"<|channel|>analysis<|message|>Error: {e}\n<|channel|>final<|message|>Error during generation.",
+                    "finish_reason": "error",
+                    "duration": 0,
+                    "prompt_length": len(prompt.split()),
+                    "completion_length": 0,
+                    "device": str(model.device),
+                    "request_id": request_id,
+                    "multi_chunk": multi_chunk,
+                }
+        finally:
+            job_queue.task_done()
+            logger.info("Current queue size: %d", job_queue.qsize())
 
-        finish_reason = "length" if len(generated_text.split()) >= max_tokens else "stop"
-        duration = time.time() - start_time
-
-        with lock:
-            results[job_id] = {
-                "text": generated_text,
-                "finish_reason": finish_reason,
-                "duration": duration,
-                "prompt_length": len(prompt.split()),
-                "completion_length": len(generated_text.split()),
-                "device": str(model.device),
-            }
-
-        logger.info(
-            "Job %s completed in %.2fs on device %s | Prompt tokens: %d | Completion tokens: %d | Finish reason: %s\nPrompt: %s\nGenerated: %s",
-            job_id,
-            duration,
-            model.device,
-            len(prompt.split()),
-            len(generated_text.split()),
-            finish_reason,
-            prompt,
-            generated_text,
-        )
-
-        job_queue.task_done()
-
-# Launch worker threads
 for i in range(NUM_THREADS):
     threading.Thread(target=model_worker, daemon=True, name=f"Worker-{i}").start()
 
-def submit_generation(prompt, max_tokens=MAX_TOKENS):
+def submit_generation(prompt, max_tokens=MAX_TOKENS, multi_chunk=None, request_id=None):
+    if multi_chunk is None:
+        multi_chunk = DEFAULT_MULTI_CHUNK
     with lock:
         job_id = len(results)
-    job_queue.put((job_id, prompt, max_tokens))
+    job_queue.put((job_id, prompt, max_tokens, multi_chunk, request_id))
     job_queue.join()
     with lock:
         return results.pop(job_id)
 
-# --- OpenAI-style API ---
+# --- API ---
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list
     max_tokens: int = MAX_TOKENS
+    multi_chunk: bool = None  # optional override
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     user_message = req.messages[-1]["content"]
     client_host = request.client.host
+    user_agent = request.headers.get("user-agent", "unknown")
+    request_id = str(uuid.uuid4())
+    prompt_hash = hashlib.sha256(user_message.encode("utf-8")).hexdigest()
+    multi_chunk = req.multi_chunk if req.multi_chunk is not None else DEFAULT_MULTI_CHUNK
 
-    # --- Log incoming request ---
     logger.info(
-        "Incoming request from %s | Model: %s | Max tokens: %d | Prompt tokens: %d\nPrompt: %s",
+        "Incoming request | Request ID: %s | Client: %s | User-Agent: %s | Model: %s | Max tokens: %d | Multi-chunk: %s | Prompt hash: %s",
+        request_id,
         client_host,
+        user_agent,
         req.model,
         req.max_tokens,
-        len(user_message.split()),
-        user_message,
+        multi_chunk,
+        prompt_hash,
     )
 
-    # Submit to threaded GPU runner
-    result = submit_generation(user_message, req.max_tokens)
+    result = submit_generation(user_message, req.max_tokens, multi_chunk, request_id)
 
     return {
         "id": "local-chat-1",
@@ -149,9 +213,12 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             "duration_seconds": result["duration"],
             "device": result["device"],
             "client_host": client_host,
+            "user_agent": user_agent,
+            "request_id": request_id,
+            "prompt_hash": prompt_hash,
+            "multi_chunk": result["multi_chunk"],
         },
     }
 
-# --- Run FastAPI server ---
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=6589)
+    uvicorn.run(app, host="0.0.0.0", port=args.port)
