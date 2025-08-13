@@ -18,34 +18,19 @@ def query_api(prompt):
         resp.raise_for_status()
         data = resp.json()
         generated_text = data["choices"][0]["message"]["content"]
-        analysis = data.get("analysis", {})
-        return generated_text, analysis
+        return generated_text
     except Exception as e:
-        return f"Error: {e}", {}
+        return f"Error: {e}"
 
 # --- Gradio UI ---
-def generate_text_ui(prompt, show_analysis=False):
-    text, analysis = query_api(prompt)
-    if show_analysis and analysis:
-        analysis_text = (
-            f"Attention shapes:\n{analysis.get('attention_shapes')}\n\n"
-            f"Hidden state shapes:\n{analysis.get('hidden_state_shapes')}"
-        )
-    else:
-        analysis_text = ""
-    return text, analysis_text
+def generate_text_ui(prompt):
+    return query_api(prompt)
 
 iface = gr.Interface(
     fn=generate_text_ui,
-    inputs=[
-        gr.Textbox(lines=5, label="Enter prompt"),
-        gr.Checkbox(label="Show CoT / Analysis"),
-    ],
-    outputs=[
-        gr.Textbox(lines=15, label="Generated text"),
-        gr.Textbox(lines=15, label="CoT / Analysis"),
-    ],
-    title="GPT-OSS-20B Text Generation with CoT",
+    inputs=gr.Textbox(lines=5, label="Enter prompt"),
+    outputs=gr.Textbox(lines=15, label="Generated text"),
+    title="GPT-OSS-20B Text Generation",
 )
 
 # --- Launch Gradio ---
