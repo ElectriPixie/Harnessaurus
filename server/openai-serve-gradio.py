@@ -1,62 +1,71 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import gradio as gr
 import threading
 import uvicorn
 
-# --- Initialize FastAPI application ---
+# --- Initialize FastAPI ---
 app = FastAPI()
 
-# Path to your local GPT-OSS model
+# --- Configurable parameters ---
 model_id = "/data/AI/Models/gpt-oss-20b"
+MAX_TOKENS = 256  # max tokens for generation
 
-print("Loading model...")
-
-# --- Load model and tokenizer via HuggingFace pipeline ---
-pipe = pipeline(
-    "text-generation",
-    model=model_id,
-    torch_dtype="auto",  # Automatically chooses a safe dtype based on your GPU/hardware.
-    device_map="auto",   # Automatically maps model layers to available devices (GPU/CPU).
+print("Loading model and tokenizer...")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    torch_dtype="auto",
+    device_map="auto",
 )
 
-# --- Define request model for OpenAI-style API ---
+# --- Request model for OpenAI-style API ---
 class ChatCompletionRequest(BaseModel):
-    model: str               # Model name / identifier from the request
-    messages: list           # List of messages in OpenAI chat format
-    max_tokens: int = 256    # Max tokens for the response (default 256)
+    model: str
+    messages: list
+    max_tokens: int = MAX_TOKENS
 
-# --- API endpoint to mimic OpenAI /v1/chat/completions ---
+# --- API endpoint ---
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
-    # Take the last user message from the messages array
     user_message = req.messages[-1]["content"]
 
-    # Generate text using the pipeline safely
-    # Sampling parameters help avoid NaNs and keep generation coherent:
-    #   do_sample=True allows stochastic generation
-    #   temperature=0.7 controls randomness (lower = more deterministic)
-    #   top_k=50 and top_p=0.95 limit extreme logits for stability
-    outputs = pipe(
-        user_message,
-        max_new_tokens=req.max_tokens,
-        do_sample=True,
-        temperature=0.7,
-        top_k=50,
-        top_p=0.95,
-    )
+    # Tokenize input
+    inputs = tokenizer(user_message, return_tensors="pt").to(model.device)
 
-    # Extract generated text
-    generated_text = outputs[0]["generated_text"]
+    # Generate text with attentions and hidden states
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=req.max_tokens,
+            do_sample=True,
+            temperature=0.7,
+            top_k=50,
+            top_p=0.95,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict_in_generate=True,
+        )
 
-    # If the model repeated the prompt, trim it out
+    # Decode generated text
+    generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
+
+    # Trim repeated prompt
     if generated_text.startswith(user_message):
         generated_text = generated_text[len(user_message):].strip()
 
-    # Return a JSON response in OpenAI-compatible format
+    # Convert attentions and hidden states to shapes for lightweight info
+    # (avoid returning full tensors unless you want huge JSON)
+    attention_shapes = [
+        tuple(layer.shape) for layer in outputs.attentions[0]  # first generation step
+    ]
+    hidden_state_shapes = [
+        tuple(layer.shape) for layer in outputs.hidden_states[0]  # first generation step
+    ]
+
     return {
         "id": "local-chat-1",
         "object": "chat.completion",
@@ -69,32 +78,42 @@ async def chat_completions(req: ChatCompletionRequest):
                 "finish_reason": "stop",
             }
         ],
+        "analysis": {
+            "attention_shapes": attention_shapes,
+            "hidden_state_shapes": hidden_state_shapes,
+        },
         "usage": {
-            "prompt_tokens": len(user_message.split()),              # Rough token estimate
-            "completion_tokens": len(generated_text.split()),       # Rough token estimate
+            "prompt_tokens": len(user_message.split()),
+            "completion_tokens": len(generated_text.split()),
             "total_tokens": len(user_message.split()) + len(generated_text.split()),
         },
     }
 
-# --- Redirect root path to Gradio UI for convenience ---
+# --- Redirect root to Gradio ---
 @app.get("/")
 async def root():
     return RedirectResponse(url="/gradio")
 
-# --- Gradio UI for interactive text generation ---
+# --- Gradio UI ---
 def generate_text(prompt):
-    # Generate text similarly to the API endpoint
-    outputs = pipe(
-        prompt,
-        max_new_tokens=256,
-        do_sample=True,
-        temperature=0.7,
-        top_k=50,
-        top_p=0.95,
-    )
-    return outputs[0]["generated_text"]
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=MAX_TOKENS,
+            do_sample=True,
+            temperature=0.7,
+            top_k=50,
+            top_p=0.95,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict_in_generate=True,
+        )
+    generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
+    if generated_text.startswith(prompt):
+        generated_text = generated_text[len(prompt):].strip()
+    return generated_text
 
-# Define Gradio interface
 iface = gr.Interface(
     fn=generate_text,
     inputs=gr.Textbox(lines=5, label="Enter prompt"),
@@ -102,19 +121,17 @@ iface = gr.Interface(
     title="GPT-OSS-20B Text Generation",
 )
 
-# --- Run Gradio in a separate thread ---
-# This allows FastAPI to serve API requests simultaneously
+# --- Run Gradio in separate thread ---
 def run_gradio():
     iface.launch(
         server_name="0.0.0.0",
         server_port=7860,
         share=False,
-        prevent_thread_lock=True  # Avoids blocking the main thread
+        prevent_thread_lock=True,
     )
 
 threading.Thread(target=run_gradio, daemon=True).start()
 
-# --- Run FastAPI server via uvicorn ---
+# --- Run FastAPI ---
 if __name__ == "__main__":
-    # FastAPI will listen on port 8000 for API calls
     uvicorn.run(app, host="0.0.0.0", port=8000)
