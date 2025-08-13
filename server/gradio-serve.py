@@ -2,9 +2,9 @@ import gradio as gr
 import requests
 
 # --- Config ---
-SERVER_URL = "http://localhost:8000"
+SERVER_URL = "http://localhost:6589"
 MODEL_NAME = "gpt-oss-20b"
-MAX_TOKENS = 8096
+MAX_TOKENS = 4096
 
 # --- Helper to call the FastAPI server ---
 def query_api(prompt):
@@ -14,7 +14,7 @@ def query_api(prompt):
         "max_tokens": MAX_TOKENS,
     }
     try:
-        resp = requests.post(f"{SERVER_URL}/v1/chat/completions", json=payload, timeout=60)
+        resp = requests.post(f"{SERVER_URL}/v1/chat/completions", json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         generated_text = data["choices"][0]["message"]["content"]
