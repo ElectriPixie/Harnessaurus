@@ -3,6 +3,7 @@ __pycache__/
 models/
 ignore/
 reports/
+reports_old/
 logs/
 *.log
 notes
