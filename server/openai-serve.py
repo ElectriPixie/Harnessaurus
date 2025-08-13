@@ -36,7 +36,7 @@ def model_worker():
         # Tokenize input
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-        # Generate output with attentions & hidden states
+        # Generate output
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -45,8 +45,6 @@ def model_worker():
                 temperature=0.7,
                 top_k=50,
                 top_p=0.95,
-                output_attentions=True,
-                output_hidden_states=True,
                 return_dict_in_generate=True,
             )
 
@@ -55,12 +53,8 @@ def model_worker():
         if generated_text.startswith(prompt):
             generated_text = generated_text[len(prompt):].strip()
 
-        # Save results
-        results[job_id] = {
-            "text": generated_text,
-            "attentions": [tuple(a.shape) for a in outputs.attentions[0]],
-            "hidden_states": [tuple(h.shape) for h in outputs.hidden_states[0]],
-        }
+        # Save results (only text)
+        results[job_id] = {"text": generated_text}
         job_queue.task_done()
 
 # Launch worker threads
@@ -103,10 +97,6 @@ async def chat_completions(req: ChatCompletionRequest):
                 "finish_reason": finish_reason,
             }
         ],
-        "analysis": {
-            "attention_shapes": result["attentions"],
-            "hidden_state_shapes": result["hidden_states"],
-        },
         "usage": {
             "prompt_tokens": len(user_message.split()),
             "completion_tokens": len(result["text"].split()),
