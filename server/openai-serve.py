@@ -29,15 +29,31 @@ parser.add_argument("--temperature", type=float, default=0.1)
 parser.add_argument("--top_k", type=int, default=1)
 parser.add_argument("--top_p", type=float, default=1.0)
 parser.add_argument("--do_sample", action="store_true", default=False)
+parser.add_argument("--deterministic", choices=["on", "off"], default="on", help="Enable deterministic outputs")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--log_dir", type=str, default="logs")
 parser.add_argument("--log_mode", choices=["full", "preview"], default="full")
 parser.add_argument("--log_preview_length", type=int, default=200)
+parser.add_argument(
+    "--harmony_newlines",
+    choices=["on", "off"],
+    default="off",  # default is no newlines
+    help="Add newline characters after Harmony special tokens (default: off)"
+)
 args = parser.parse_args()
 
+ADD_HARMONY_NEWLINES = args.harmony_newlines.lower() == "on"
 # --- Deterministic setup ---
-torch.manual_seed(args.seed)
-torch.use_deterministic_algorithms(True)
+DETERMINISTIC = args.deterministic.lower() == "on"
+
+if DETERMINISTIC:
+    torch.manual_seed(args.seed)
+    torch.use_deterministic_algorithms(True)
+    logging.info(f"Deterministic mode ON | Seed: {args.seed}")
+else:
+    # Non-deterministic mode: allow PyTorch to use default RNG
+    torch.use_deterministic_algorithms(False)
+    logging.info("Deterministic mode OFF | Using PyTorch default RNG")
 
 # --- Config ---
 MODEL_ID = args.model_id
@@ -46,7 +62,7 @@ CHUNK_SIZE = args.chunk_size
 NUM_THREADS = args.num_threads
 DEFAULT_MULTI_CHUNK = args.multi_chunk
 HARMONY_MODE = args.harmony
-DEBUG_MODEL_DATA = args.debug_model_data
+DEBUG_MODEL_DATA = args.debug_model_data == "on"
 TEMPERATURE = args.temperature
 TOP_K = args.top_k
 TOP_P = args.top_p
@@ -84,48 +100,36 @@ job_queue = Queue()
 results = {}
 lock = threading.Lock()
 
-# --- Harmony helpers ---
 def inject_harmony_prompt(messages: list) -> str:
-    """
-    Converts a list of message dicts into Harmony format.
-    Each message dict: {role, content}
-    """
+    sep = "\n" if ADD_HARMONY_NEWLINES else ""
     harmony_prompt = ""
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
-        harmony_prompt += f"<|role|>{role}\n<|message|>{content}\n<|/role|>\n"
-    # Add system instruction to assistant for Harmony output
+        harmony_prompt += f"<|role|>{role}{sep}<|message|>{content}{sep}<|/role|>{sep}"
     harmony_prompt += (
-        "<|role|>system\n<|message|>"
+        f"<|role|>system{sep}<|message|>"
         "You are an assistant that outputs text in Harmony format.\n"
-        "Always include <|channel|>analysis and <|channel|>final channels in assistant outputs.\n"
-        "<|/message|>\n<|/role|>\n"
+        "Always include <|channel|>analysis and <|channel|>final channels in assistant outputs."
+        f"{sep}<|/message|>{sep}<|/role|>{sep}"
     )
     return harmony_prompt
 
 def format_harmony_output(raw_text: str) -> str:
-    """
-    Ensures Harmony format:
-      - Wrap assistant message in <|role|>assistant ... <|/role|>
-      - Always include analysis and final channels
-      - Append <|return|>
-    """
+    sep = "\n" if ADD_HARMONY_NEWLINES else ""
     channels = {}
     for part in raw_text.split("<|channel|>"):
         if "<|message|>" in part:
             name, content = part.split("<|message|>", 1)
             channels[name.strip()] = content.strip()
-
     if "analysis" not in channels or not channels["analysis"]:
         channels["analysis"] = "We must refuse."
     if "final" not in channels or not channels["final"]:
         channels["final"] = "I’m sorry, but I can’t help with that."
-
-    assistant_text = "<|role|>assistant\n"
+    assistant_text = f"<|role|>assistant{sep}"
     for ch_name in ["analysis", "final"]:
-        assistant_text += f"<|channel|>{ch_name}<|message|>{channels[ch_name]}\n"
-    assistant_text += "<|/role|>\n<|return|>"
+        assistant_text += f"<|channel|>{ch_name}<|message|>{channels[ch_name]}{sep}"
+    assistant_text += f"<|/role|>{sep}<|return|>"
     return assistant_text
 
 # --- Worker ---
@@ -146,20 +150,21 @@ def model_worker():
             while tokens_generated < max_tokens:
                 inputs = tokenizer(context, return_tensors="pt").to(model.device)
                 with torch.no_grad():
+                    do_sample_flag = args.do_sample and not DETERMINISTIC
                     generate_kwargs = {
                         "max_new_tokens": min(CHUNK_SIZE, max_tokens - tokens_generated),
-                        "do_sample": args.do_sample,
+                        "do_sample": do_sample_flag,
                         "return_dict_in_generate": True,
-                        "output_hidden_states": DEBUG_MODEL_DATA == "on",
-                        "output_attentions": DEBUG_MODEL_DATA == "on"
+                        "output_hidden_states": DEBUG_MODEL_DATA,
+                        "output_attentions": DEBUG_MODEL_DATA
                     }
-                    if args.do_sample:
+                    if do_sample_flag:
                         generate_kwargs.update({
                             "temperature": TEMPERATURE,
                             "top_k": TOP_K,
                             "top_p": TOP_P
                         })
-                    outputs = model.generate(**inputs, **generate_kwargs)
+                    outputs = model.generate(**generate_kwargs, **inputs)
 
                 prev_len = inputs.input_ids.shape[1]
                 new_tokens = outputs.sequences[0][prev_len:]
@@ -173,7 +178,7 @@ def model_worker():
                 log_preview = log_text if args.log_mode == "full" else log_text[:args.log_preview_length]
                 logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated}\n{log_preview}")
 
-                if DEBUG_MODEL_DATA == "on":
+                if DEBUG_MODEL_DATA:
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
                     all_attentions.append([a.cpu().tolist() for a in outputs.attentions])
 
@@ -183,8 +188,6 @@ def model_worker():
             finish_reason = "length" if tokens_generated >= max_tokens else "stop"
             duration = time.time() - start_time
             content_out = format_harmony_output(full_text) if HARMONY_MODE == "on" else full_text.strip()
-
-            logger.info(f"[Worker] FINAL Job {job_id} | Tokens: {tokens_generated} | Content output:\n{content_out}")
 
             with lock:
                 results[job_id] = {
@@ -199,7 +202,7 @@ def model_worker():
                     "multi_chunk": multi_chunk,
                     "prompt_raw": prompt_with_harmony
                 }
-                if DEBUG_MODEL_DATA == "on":
+                if DEBUG_MODEL_DATA:
                     results[job_id]["hidden_states"] = all_hidden_states
                     results[job_id]["attentions"] = all_attentions
 
@@ -271,7 +274,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         "harmony_raw": result["harmony"],
         "prompt_raw": result.get("prompt_raw"),
     }
-    if DEBUG_MODEL_DATA == "on":
+    if DEBUG_MODEL_DATA:
         debug_data["hidden_states"] = result.get("hidden_states")
         debug_data["attentions"] = result.get("attentions")
 
