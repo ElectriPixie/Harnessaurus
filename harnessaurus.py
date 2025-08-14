@@ -63,7 +63,7 @@ def main():
                             'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
-    parser.add_argument('--server_url', required=True, help='llama-server base URL, e.g. http://localhost:6589')
+    parser.add_argument('--server_url', help='llama-server base URL, e.g. http://localhost:6589', default="http://localhost:6589")
     parser.add_argument('--model_name', default='llama', help='Model name for llama-server API')
     parser.add_argument('--max_tokens_per_chunk', type=int, default=256)
     parser.add_argument('--max_iterations', type=int, default=10)

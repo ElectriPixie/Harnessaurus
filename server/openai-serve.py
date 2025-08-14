@@ -13,8 +13,10 @@ import hashlib
 import argparse
 
 # --- CLI arguments ---
-parser = argparse.ArgumentParser(description="OpenAI-style server with optional multi-chunk mode")
+parser = argparse.ArgumentParser(description="OpenAI-style local server with optional multi-chunk + harmony output")
 parser.add_argument("--multi_chunk", action="store_true", help="Enable multi-chunk generation by default")
+parser.add_argument("--harmony", choices=["off", "on", "both"], default="off",
+                    help="Harmony output mode: off (no tags), on (tags in content), both (normal + tags in debug)")
 parser.add_argument("--port", type=int, default=6589, help="Server port")
 args = parser.parse_args()
 
@@ -36,6 +38,7 @@ MAX_TOKENS = 4096
 CHUNK_SIZE = 1024
 NUM_THREADS = 4
 DEFAULT_MULTI_CHUNK = args.multi_chunk
+HARMONY_MODE = args.harmony
 
 # --- Load model & tokenizer ---
 logger.info("Loading model and tokenizer...")
@@ -45,7 +48,7 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype="auto",
     device_map="auto",
 )
-logger.info("Model loaded on device %s", next(model.parameters()).device)
+logger.info("Model loaded successfully on device %s", next(model.parameters()).device)
 
 # --- Threaded job queue ---
 job_queue = Queue()
@@ -59,9 +62,9 @@ def model_worker():
             break
         job_id, prompt, max_tokens, multi_chunk, request_id = job
         start_time = time.time()
-        analysis_text = ""
         try:
             if multi_chunk:
+                # Multi-chunk generation loop
                 context = prompt
                 full_text = ""
                 tokens_generated = 0
@@ -80,16 +83,14 @@ def model_worker():
                     chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
                     if chunk.startswith(context):
                         chunk = chunk[len(context):].strip()
-                    # Append to full text
                     full_text += " " + chunk
-                    # Append to analysis
-                    analysis_text += f"Chunk {tokens_generated // CHUNK_SIZE + 1} generated {len(chunk.split())} tokens.\n"
                     tokens_generated += len(chunk.split())
                     context += " " + chunk
                     if len(chunk.split()) < min(CHUNK_SIZE, max_tokens - tokens_generated):
                         break
                 generated_text = full_text.strip()
             else:
+                # Single-chunk generation
                 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
                 with torch.no_grad():
                     outputs = model.generate(
@@ -104,14 +105,20 @@ def model_worker():
                 generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
                 if generated_text.startswith(prompt):
                     generated_text = generated_text[len(prompt):].strip()
-                analysis_text += f"Single-chunk generated {len(generated_text.split())} tokens.\n"
+
+            # Create Harmony-formatted output
+            harmony_output = (
+                f"<|channel|>analysis<|message|>Generated {len(generated_text.split())} tokens.\n"
+                f"<|channel|>final<|message|>{generated_text}"
+            )
 
             finish_reason = "length" if len(generated_text.split()) >= max_tokens else "stop"
             duration = time.time() - start_time
 
             with lock:
                 results[job_id] = {
-                    "text": f"<|channel|>analysis<|message|>{analysis_text.strip()}\n<|channel|>final<|message|>{generated_text}",
+                    "text": generated_text,
+                    "harmony": harmony_output,
                     "finish_reason": finish_reason,
                     "duration": duration,
                     "prompt_length": len(prompt.split()),
@@ -137,7 +144,8 @@ def model_worker():
             logger.exception("Error generating output for job %s | Request ID: %s | Prompt: %s", job_id, request_id, prompt)
             with lock:
                 results[job_id] = {
-                    "text": f"<|channel|>analysis<|message|>Error: {e}\n<|channel|>final<|message|>Error during generation.",
+                    "text": f"Error during generation: {e}",
+                    "harmony": f"<|channel|>analysis<|message|>Error occurred\n<|channel|>final<|message|>Error: {e}",
                     "finish_reason": "error",
                     "duration": 0,
                     "prompt_length": len(prompt.split()),
@@ -168,7 +176,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: list
     max_tokens: int = MAX_TOKENS
-    multi_chunk: bool = None  # optional override
+    multi_chunk: bool = None  # Optional override
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
@@ -192,7 +200,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
     result = submit_generation(user_message, req.max_tokens, multi_chunk, request_id)
 
-    return {
+    # Decide what to put in `content`
+    if HARMONY_MODE == "on":
+        content_out = result["harmony"]
+    elif HARMONY_MODE == "both":
+        content_out = result["text"]
+    else:
+        content_out = result["text"]
+
+    response = {
         "id": "local-chat-1",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -200,7 +216,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": result["text"]},
+                "message": {"role": "assistant", "content": content_out},
                 "finish_reason": result["finish_reason"],
             }
         ],
@@ -219,6 +235,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             "multi_chunk": result["multi_chunk"],
         },
     }
+
+    if HARMONY_MODE == "both":
+        response["debug"]["harmony_raw"] = result["harmony"]
+
+    return response
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=args.port)
