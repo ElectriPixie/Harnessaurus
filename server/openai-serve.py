@@ -1,5 +1,6 @@
 import os
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
 import logging
 import threading
 from queue import Queue
@@ -29,11 +30,9 @@ parser.add_argument("--top_k", type=int, default=1)
 parser.add_argument("--top_p", type=float, default=1.0)
 parser.add_argument("--do_sample", action="store_true", default=False)
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--log_dir", type=str, default="logs", help="Directory to store detailed logs")
-parser.add_argument("--log_mode", choices=["full", "preview"], default="full",
-                    help="Full logs or truncated preview logs")
-parser.add_argument("--log_preview_length", type=int, default=200,
-                    help="Number of characters to log in preview mode")
+parser.add_argument("--log_dir", type=str, default="logs")
+parser.add_argument("--log_mode", choices=["full", "preview"], default="full")
+parser.add_argument("--log_preview_length", type=int, default=200)
 args = parser.parse_args()
 
 # --- Deterministic setup ---
@@ -60,13 +59,13 @@ log_file = os.path.join(args.log_dir, f"generation_{timestamp}.log")
 logger = logging.getLogger("local_chat")
 logger.setLevel(logging.INFO)
 
-# File handler (detailed)
+# File handler
 fh = logging.FileHandler(log_file)
 fh.setLevel(logging.INFO)
 fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [Thread %(threadName)s] %(message)s"))
 logger.addHandler(fh)
 
-# Console handler (simpler)
+# Console handler
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
@@ -144,16 +143,24 @@ def model_worker():
                 chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
                 if chunk.startswith(context):
                     chunk = chunk[len(context):].strip()
+
                 full_text += " " + chunk
                 tokens_generated += len(chunk.split())
                 context += " " + chunk
 
-                # --- Corrected logging ---
+                # --- Harmony logging per chunk ---
+                harmony_chunk = extract_harmony_channels(chunk) if HARMONY_MODE == "on" else ""
                 if args.log_mode == "full":
-                    log_chunk = chunk
+                    log_chunk_text = chunk
+                    log_chunk_harmony = harmony_chunk
                 else:
-                    log_chunk = chunk[:args.log_preview_length]
-                logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | Preview: {log_chunk}")
+                    log_chunk_text = chunk[:args.log_preview_length]
+                    log_chunk_harmony = harmony_chunk[:args.log_preview_length]
+
+                logger.info(
+                    f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | "
+                    f"Preview: {log_chunk_text} | Harmony: {log_chunk_harmony}"
+                )
 
                 if DEBUG_MODEL_DATA == "on":
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
@@ -164,7 +171,6 @@ def model_worker():
 
             generated_text = full_text.strip()
             harmony_output = extract_harmony_channels(generated_text) if HARMONY_MODE == "on" else ""
-
             finish_reason = "length" if tokens_generated >= max_tokens else "stop"
             duration = time.time() - start_time
 
