@@ -59,13 +59,11 @@ log_file = os.path.join(args.log_dir, f"generation_{timestamp}.log")
 logger = logging.getLogger("local_chat")
 logger.setLevel(logging.INFO)
 
-# File handler
 fh = logging.FileHandler(log_file)
 fh.setLevel(logging.INFO)
 fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [Thread %(threadName)s] %(message)s"))
 logger.addHandler(fh)
 
-# Console handler
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
@@ -118,8 +116,7 @@ def model_worker():
             context = prompt_with_harmony
             full_text = ""
             tokens_generated = 0
-            all_hidden_states = []
-            all_attentions = []
+            all_hidden_states, all_attentions = [], []
 
             while tokens_generated < max_tokens:
                 inputs = tokenizer(context, return_tensors="pt").to(model.device)
@@ -128,8 +125,8 @@ def model_worker():
                         "max_new_tokens": min(CHUNK_SIZE, max_tokens - tokens_generated),
                         "do_sample": args.do_sample,
                         "return_dict_in_generate": True,
-                        "output_hidden_states": DEBUG_MODEL_DATA=="on",
-                        "output_attentions": DEBUG_MODEL_DATA=="on"
+                        "output_hidden_states": DEBUG_MODEL_DATA == "on",
+                        "output_attentions": DEBUG_MODEL_DATA == "on"
                     }
                     if args.do_sample:
                         generate_kwargs.update({
@@ -137,7 +134,6 @@ def model_worker():
                             "top_k": TOP_K,
                             "top_p": TOP_P
                         })
-
                     outputs = model.generate(**inputs, **generate_kwargs)
 
                 chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
@@ -148,19 +144,14 @@ def model_worker():
                 tokens_generated += len(chunk.split())
                 context += " " + chunk
 
-                # --- Harmony logging per chunk ---
-                harmony_chunk = extract_harmony_channels(chunk) if HARMONY_MODE == "on" else ""
-                if args.log_mode == "full":
-                    log_chunk_text = chunk
-                    log_chunk_harmony = harmony_chunk
+                # --- Per-chunk logging ---
+                if HARMONY_MODE == "on":
+                    harmony_so_far = extract_harmony_channels(full_text)
+                    log_preview = harmony_so_far if args.log_mode == "full" else harmony_so_far[:args.log_preview_length]
+                    logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | Harmony:\n{log_preview}")
                 else:
-                    log_chunk_text = chunk[:args.log_preview_length]
-                    log_chunk_harmony = harmony_chunk[:args.log_preview_length]
-
-                logger.info(
-                    f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | "
-                    f"Preview: {log_chunk_text} | Harmony: {log_chunk_harmony}"
-                )
+                    log_preview = chunk if args.log_mode == "full" else chunk[:args.log_preview_length]
+                    logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | Preview: {log_preview}")
 
                 if DEBUG_MODEL_DATA == "on":
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
@@ -169,10 +160,16 @@ def model_worker():
                 if len(chunk.split()) < min(CHUNK_SIZE, max_tokens - tokens_generated):
                     break
 
+            # --- FINAL log of full response ---
             generated_text = full_text.strip()
             harmony_output = extract_harmony_channels(generated_text) if HARMONY_MODE == "on" else ""
             finish_reason = "length" if tokens_generated >= max_tokens else "stop"
             duration = time.time() - start_time
+
+            if HARMONY_MODE == "on":
+                logger.info(f"[Worker] FINAL Job {job_id} | Tokens: {tokens_generated} | Harmony output:\n{harmony_output}")
+            else:
+                logger.info(f"[Worker] FINAL Job {job_id} | Tokens: {tokens_generated} | Full text:\n{generated_text}")
 
             with lock:
                 results[job_id] = {
@@ -191,8 +188,6 @@ def model_worker():
                     results[job_id]["hidden_states"] = all_hidden_states
                     results[job_id]["attentions"] = all_attentions
 
-            logger.info(f"[Worker] FINISH Job {job_id} | Duration: {duration:.2f}s | Tokens: {tokens_generated}")
-
         except Exception as e:
             logger.exception(f"[Worker] ERROR Job {job_id} | Request ID: {request_id}")
             with lock:
@@ -210,11 +205,11 @@ def model_worker():
         finally:
             job_queue.task_done()
 
-# --- Start workers ---
+# --- Start worker threads ---
 for i in range(NUM_THREADS):
     threading.Thread(target=model_worker, daemon=True, name=f"Worker-{i}").start()
 
-# --- Non-blocking submit ---
+# --- Submit job ---
 def submit_generation(prompt, max_tokens=MAX_TOKENS, multi_chunk=None, request_id=None):
     if multi_chunk is None:
         multi_chunk = DEFAULT_MULTI_CHUNK
@@ -227,7 +222,7 @@ def submit_generation(prompt, max_tokens=MAX_TOKENS, multi_chunk=None, request_i
                 return results.pop(job_id)
         time.sleep(0.05)
 
-# --- API ---
+# --- FastAPI Request ---
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list
