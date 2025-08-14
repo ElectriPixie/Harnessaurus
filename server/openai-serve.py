@@ -1,3 +1,5 @@
+import os
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 import logging
 import threading
 from queue import Queue
@@ -7,18 +9,36 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import uvicorn
 import time
-import os
 import uuid
 import hashlib
 import argparse
 
 # --- CLI arguments ---
-parser = argparse.ArgumentParser(description="OpenAI-style local server with optional multi-chunk + harmony output")
+parser = argparse.ArgumentParser(description="OpenAI-style local server with multi-chunk + harmony output")
 parser.add_argument("--multi_chunk", action="store_true", help="Enable multi-chunk generation by default")
-parser.add_argument("--harmony", choices=["off", "on", "both"], default="off",
+parser.add_argument("--harmony", choices=["off", "on", "both"], default="Both",
                     help="Harmony output mode: off (no tags), on (tags in content), both (normal + tags in debug)")
 parser.add_argument("--port", type=int, default=6589, help="Server port")
+parser.add_argument("--temperature", type=float, default=0.1, help="Sampling temperature for reproducible outputs")
+parser.add_argument("--top_k", type=int, default=1, help="Top-k sampling")
+parser.add_argument("--top_p", type=float, default=1.0, help="Top-p (nucleus) sampling")
+parser.add_argument("--do_sample", action="store_true", default=False,
+                    help="Enable sampling (default False for deterministic output)")
+parser.add_argument("--seed", type=int, default=42, help="Manual random seed for reproducibility")
 args = parser.parse_args()
+
+torch.manual_seed(args.seed)
+torch.use_deterministic_algorithms(True)
+
+#if args.do_sample:
+#    temperature = args.temperature if args.temperature > 0 else 1.0
+#    top_k = args.top_k
+#    top_p = args.top_p
+#else:
+#    # deterministic
+#    temperature = 1.0  # ignored
+#    top_k = 1          # ignored
+#    top_p = 1.0        # ignored
 
 # --- Logging setup ---
 os.makedirs("logs", exist_ok=True)
@@ -39,6 +59,9 @@ CHUNK_SIZE = 1024
 NUM_THREADS = 4
 DEFAULT_MULTI_CHUNK = args.multi_chunk
 HARMONY_MODE = args.harmony
+TEMPERATURE = args.temperature
+TOP_K = args.top_k
+TOP_P = args.top_p
 
 # --- Load model & tokenizer ---
 logger.info("Loading model and tokenizer...")
@@ -64,7 +87,6 @@ def model_worker():
         start_time = time.time()
         try:
             if multi_chunk:
-                # Multi-chunk generation loop
                 context = prompt
                 full_text = ""
                 tokens_generated = 0
@@ -74,10 +96,10 @@ def model_worker():
                         outputs = model.generate(
                             **inputs,
                             max_new_tokens=min(CHUNK_SIZE, max_tokens - tokens_generated),
-                            do_sample=True,
-                            temperature=0.7,
-                            top_k=50,
-                            top_p=0.95,
+                            do_sample=args.do_sample,
+                            temperature=TEMPERATURE,
+                            top_k=TOP_K,
+                            top_p=TOP_P,
                             return_dict_in_generate=True,
                         )
                     chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
@@ -90,27 +112,24 @@ def model_worker():
                         break
                 generated_text = full_text.strip()
             else:
-                # Single-chunk generation
                 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
                 with torch.no_grad():
                     outputs = model.generate(
                         **inputs,
                         max_new_tokens=max_tokens,
                         do_sample=True,
-                        temperature=0.7,
-                        top_k=50,
-                        top_p=0.95,
+                        temperature=TEMPERATURE,
+                        top_k=TOP_K,
+                        top_p=TOP_P,
                         return_dict_in_generate=True,
                     )
                 generated_text = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
                 if generated_text.startswith(prompt):
                     generated_text = generated_text[len(prompt):].strip()
 
-            # Create Harmony-formatted output
-            harmony_output = (
-                f"<|channel|>analysis<|message|>Generated {len(generated_text.split())} tokens.\n"
-                f"<|channel|>final<|message|>{generated_text}"
-            )
+            # Harmony tags
+            harmony_output = f"<|channel|>analysis<|message|>Generated {len(generated_text.split())} tokens.\n" \
+                             f"<|channel|>final<|message|>{generated_text}"
 
             finish_reason = "length" if len(generated_text.split()) >= max_tokens else "stop"
             duration = time.time() - start_time
@@ -129,10 +148,9 @@ def model_worker():
                 }
 
             logger.info(
-                "Job %s completed in %.2fs on device %s | Prompt tokens: %d | Completion tokens: %d | Finish reason: %s | Request ID: %s | Multi-chunk: %s",
+                "Job %s completed in %.2fs | Prompt tokens: %d | Completion tokens: %d | Finish reason: %s | Request ID: %s | Multi-chunk: %s",
                 job_id,
                 duration,
-                model.device,
                 len(prompt.split()),
                 len(generated_text.split()),
                 finish_reason,
@@ -141,7 +159,7 @@ def model_worker():
             )
 
         except Exception as e:
-            logger.exception("Error generating output for job %s | Request ID: %s | Prompt: %s", job_id, request_id, prompt)
+            logger.exception("Error generating job %s | Request ID: %s | Prompt: %s", job_id, request_id, prompt)
             with lock:
                 results[job_id] = {
                     "text": f"Error during generation: {e}",
@@ -156,7 +174,6 @@ def model_worker():
                 }
         finally:
             job_queue.task_done()
-            logger.info("Current queue size: %d", job_queue.qsize())
 
 for i in range(NUM_THREADS):
     threading.Thread(target=model_worker, daemon=True, name=f"Worker-{i}").start()
@@ -176,7 +193,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: list
     max_tokens: int = MAX_TOKENS
-    multi_chunk: bool = None  # Optional override
+    multi_chunk: bool = None
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
@@ -187,20 +204,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     prompt_hash = hashlib.sha256(user_message.encode("utf-8")).hexdigest()
     multi_chunk = req.multi_chunk if req.multi_chunk is not None else DEFAULT_MULTI_CHUNK
 
-    logger.info(
-        "Incoming request | Request ID: %s | Client: %s | User-Agent: %s | Model: %s | Max tokens: %d | Multi-chunk: %s | Prompt hash: %s",
-        request_id,
-        client_host,
-        user_agent,
-        req.model,
-        req.max_tokens,
-        multi_chunk,
-        prompt_hash,
-    )
-
     result = submit_generation(user_message, req.max_tokens, multi_chunk, request_id)
 
-    # Decide what to put in `content`
     if HARMONY_MODE == "on":
         content_out = result["harmony"]
     elif HARMONY_MODE == "both":
@@ -214,11 +219,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         "created": int(time.time()),
         "model": req.model,
         "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": content_out},
-                "finish_reason": result["finish_reason"],
-            }
+            {"index": 0, "message": {"role": "assistant", "content": content_out},
+             "finish_reason": result["finish_reason"]}
         ],
         "usage": {
             "prompt_tokens": result["prompt_length"],
