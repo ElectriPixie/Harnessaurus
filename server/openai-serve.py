@@ -1,6 +1,5 @@
 import os
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-
 import logging
 import threading
 from queue import Queue
@@ -13,6 +12,7 @@ import time
 import uuid
 import hashlib
 import argparse
+from datetime import datetime
 
 # --- CLI arguments ---
 parser = argparse.ArgumentParser(description="OpenAI-style local server with multi-chunk + harmony output")
@@ -29,6 +29,11 @@ parser.add_argument("--top_k", type=int, default=1)
 parser.add_argument("--top_p", type=float, default=1.0)
 parser.add_argument("--do_sample", action="store_true", default=False)
 parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--log_dir", type=str, default="logs", help="Directory to store detailed logs")
+parser.add_argument("--log_mode", choices=["full", "preview"], default="full",
+                    help="Full logs or truncated preview logs")
+parser.add_argument("--log_preview_length", type=int, default=200,
+                    help="Number of characters to log in preview mode")
 args = parser.parse_args()
 
 # --- Deterministic setup ---
@@ -47,20 +52,27 @@ TEMPERATURE = args.temperature
 TOP_K = args.top_k
 TOP_P = args.top_p
 
-# --- Logging ---
-os.makedirs("logs", exist_ok=True)
+# --- Logging setup ---
+os.makedirs(args.log_dir, exist_ok=True)
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+log_file = os.path.join(args.log_dir, f"generation_{timestamp}.log")
+
 logger = logging.getLogger("local_chat")
 logger.setLevel(logging.INFO)
-# File handler
-fh = logging.FileHandler("logs/generation.log")
+
+# File handler (detailed)
+fh = logging.FileHandler(log_file)
 fh.setLevel(logging.INFO)
 fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [Thread %(threadName)s] %(message)s"))
 logger.addHandler(fh)
-# Console handler
+
+# Console handler (simpler)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
-ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [Thread %(threadName)s] %(message)s"))
+ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logger.addHandler(ch)
+
+logger.info("Starting server with model: %s", MODEL_ID)
 
 # --- FastAPI ---
 app = FastAPI()
@@ -102,7 +114,6 @@ def model_worker():
             break
         job_id, prompt, max_tokens, multi_chunk, request_id = job
         start_time = time.time()
-        logger.info(f"[Worker] Starting job {job_id} | Request ID: {request_id} | Multi-chunk: {multi_chunk}")
         try:
             prompt_with_harmony = inject_harmony_prompt(prompt) if HARMONY_MODE == "on" else prompt
             context = prompt_with_harmony
@@ -114,17 +125,22 @@ def model_worker():
             while tokens_generated < max_tokens:
                 inputs = tokenizer(context, return_tensors="pt").to(model.device)
                 with torch.no_grad():
-                    outputs = model.generate(
-                        **inputs,
-                        max_new_tokens=min(CHUNK_SIZE, max_tokens - tokens_generated),
-                        do_sample=args.do_sample,
-                        temperature=TEMPERATURE,
-                        top_k=TOP_K,
-                        top_p=TOP_P,
-                        return_dict_in_generate=True,
-                        output_hidden_states=DEBUG_MODEL_DATA=="on",
-                        output_attentions=DEBUG_MODEL_DATA=="on"
-                    )
+                    generate_kwargs = {
+                        "max_new_tokens": min(CHUNK_SIZE, max_tokens - tokens_generated),
+                        "do_sample": args.do_sample,
+                        "return_dict_in_generate": True,
+                        "output_hidden_states": DEBUG_MODEL_DATA=="on",
+                        "output_attentions": DEBUG_MODEL_DATA=="on"
+                    }
+                    if args.do_sample:
+                        generate_kwargs.update({
+                            "temperature": TEMPERATURE,
+                            "top_k": TOP_K,
+                            "top_p": TOP_P
+                        })
+
+                    outputs = model.generate(**inputs, **generate_kwargs)
+
                 chunk = tokenizer.decode(outputs.sequences[0], skip_special_tokens=True)
                 if chunk.startswith(context):
                     chunk = chunk[len(context):].strip()
@@ -132,7 +148,12 @@ def model_worker():
                 tokens_generated += len(chunk.split())
                 context += " " + chunk
 
-                logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | Chunk preview: {chunk[:80]}...")
+                # --- Corrected logging ---
+                if args.log_mode == "full":
+                    log_chunk = chunk
+                else:
+                    log_chunk = chunk[:args.log_preview_length]
+                logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated} | Preview: {log_chunk}")
 
                 if DEBUG_MODEL_DATA == "on":
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
@@ -164,10 +185,10 @@ def model_worker():
                     results[job_id]["hidden_states"] = all_hidden_states
                     results[job_id]["attentions"] = all_attentions
 
-            logger.info(f"[Worker] Job {job_id} completed | Duration: {duration:.2f}s | Tokens: {tokens_generated}")
+            logger.info(f"[Worker] FINISH Job {job_id} | Duration: {duration:.2f}s | Tokens: {tokens_generated}")
 
         except Exception as e:
-            logger.exception(f"[Worker] Error generating job {job_id} | Request ID: {request_id}")
+            logger.exception(f"[Worker] ERROR Job {job_id} | Request ID: {request_id}")
             with lock:
                 results[job_id] = {
                     "text": f"Error: {e}",
@@ -194,7 +215,6 @@ def submit_generation(prompt, max_tokens=MAX_TOKENS, multi_chunk=None, request_i
     with lock:
         job_id = len(results)
     job_queue.put((job_id, prompt, max_tokens, multi_chunk, request_id))
-    # Poll until result is ready instead of blocking
     while True:
         with lock:
             if job_id in results:
@@ -218,7 +238,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     multi_chunk = req.multi_chunk if req.multi_chunk is not None else DEFAULT_MULTI_CHUNK
 
     logger.info(f"[API] Incoming request | Request ID: {request_id} | IP: {client_host} | UA: {user_agent} | Prompt hash: {prompt_hash}")
-    logger.info(f"[API] User message: {user_message}")
+    logger.info(f"[API] User message preview: {user_message[:200]}")
 
     result = submit_generation(user_message, req.max_tokens, multi_chunk, request_id)
     content_out = result["harmony"] if HARMONY_MODE == "on" else result["text"]
