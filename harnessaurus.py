@@ -69,6 +69,7 @@ def main():
     parser.add_argument('--max_iterations', type=int, default=10)
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=True)
+    parser.add_argument('--max_mutations', type=int, default=1)
 
     args = parser.parse_args()
     DEBUG = args.debug
@@ -158,6 +159,7 @@ def main():
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
                     include_mutated_output=args.use_mutated,
+                    max_mutations=args.max_mutations,
                     iterator=1
                 )
 

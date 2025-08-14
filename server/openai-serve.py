@@ -21,7 +21,7 @@ parser.add_argument("--model_id", type=str, default="/data/AI/Models/gpt-oss-20b
 parser.add_argument("--max_tokens", type=int, default=4096)
 parser.add_argument("--chunk_size", type=int, default=1024)
 parser.add_argument("--num_threads", type=int, default=4)
-parser.add_argument("--multi_chunk", action="store_true")
+parser.add_argument("--multi_chunk", action="store_true", default=False)
 parser.add_argument("--harmony", choices=["off", "on"], default="on")
 parser.add_argument("--debug_model_data", choices=["off", "on"], default="off")
 parser.add_argument("--port", type=int, default=6589)
@@ -40,8 +40,15 @@ parser.add_argument(
     default="off",  # default is no newlines
     help="Add newline characters after Harmony special tokens (default: off)"
 )
+parser.add_argument(
+    "--fill_missing_channels",
+    action="store_true",
+    default=False,
+    help="If set, missing harmony channels are automatically filled with default text"
+)
 args = parser.parse_args()
 
+FILL_MISSING_CHANNELS = args.fill_missing_channels
 ADD_HARMONY_NEWLINES = args.harmony_newlines.lower() == "on"
 # --- Deterministic setup ---
 DETERMINISTIC = args.deterministic.lower() == "on"
@@ -122,13 +129,16 @@ def format_harmony_output(raw_text: str) -> str:
         if "<|message|>" in part:
             name, content = part.split("<|message|>", 1)
             channels[name.strip()] = content.strip()
-    if "analysis" not in channels or not channels["analysis"]:
-        channels["analysis"] = "We must refuse."
-    if "final" not in channels or not channels["final"]:
-        channels["final"] = "I’m sorry, but I can’t help with that."
+
+    if FILL_MISSING_CHANNELS:
+        if "analysis" not in channels or not channels["analysis"]:
+            channels["analysis"] = "We must refuse."
+        if "final" not in channels or not channels["final"]:
+            channels["final"] = "I’m sorry, but I can’t help with that."
+
     assistant_text = f"<|role|>assistant{sep}"
-    for ch_name in ["analysis", "final"]:
-        assistant_text += f"<|channel|>{ch_name}<|message|>{channels[ch_name]}{sep}"
+    for ch_name, content in channels.items():
+        assistant_text += f"<|channel|>{ch_name}<|message|>{content}{sep}"
     assistant_text += f"<|/role|>{sep}<|return|>"
     return assistant_text
 

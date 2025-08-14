@@ -116,7 +116,7 @@ class GPTModel:
             }
 
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response = requests.post(url, headers=headers, json=payload, timeout=120)
                 response.raise_for_status()
                 data = response.json()
                 chunk = data["choices"][0]["message"]["content"]
