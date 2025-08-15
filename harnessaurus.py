@@ -70,8 +70,38 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
     parser.add_argument('--max_mutations', type=int, default=1)
+    parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
+    parser.add_argument('--iterator', type=int, default=1)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--single_pass",
+        action="store_true",
+        help="Run the harness in single-pass mode. Each prompt is processed once; no iterative mutation is applied."
+    )
+    group.add_argument(
+        "--iterative",
+        action="store_true",
+        help="Run the harness in iterative mode. Prompts are chunked iteratively to test model vulnerabilities."
+    )
+    group.add_argument(
+        "--iterative_exploit",
+        action="store_true",
+        help="Run the harness in iterative exploit mode. Prompts are chunked iteratively to test model vulnerabilities. Warning: this mode may be unstable."
+    )
 
     args = parser.parse_args()
+    if args.single_pass:
+        iterator = 1
+        print("Running in single-pass mode...")
+    elif args.iterative:
+        print(f"Running in iterative mode for up to {args.max_iterations} iterations...")
+        iterator = 2
+    elif args.iterative_exploit:
+        print(f"Running in iterative exploit mode for up to {args.max_iterations} iterations...")
+        iterator = 3
+    else:
+        iterator = 1
+        print("No mode selected; defaulting to single-pass.")
     DEBUG = args.debug
 
     debug_print("[Main] Starting with debug ON")
@@ -160,7 +190,8 @@ def main():
                     max_iterations=args.max_iterations,
                     include_mutated_output=args.use_mutated,
                     max_mutations=args.max_mutations,
-                    iterator=1
+                    flip_negate=args.flip_negate,
+                    iterator=iterator
                 )
 
                 if not isinstance(rec_list, list):
