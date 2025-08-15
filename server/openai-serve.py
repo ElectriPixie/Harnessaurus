@@ -157,7 +157,10 @@ def model_worker():
             tokens_generated = 0
             all_hidden_states, all_attentions = [], []
 
-            while tokens_generated < max_tokens:
+            # Determine max iterations for server-side chunking
+            max_iterations = math.ceil(max_tokens / CHUNK_SIZE) if multi_chunk else 1
+
+            for _ in range(max_iterations):
                 inputs = tokenizer(context, return_tensors="pt").to(model.device)
                 with torch.no_grad():
                     do_sample_flag = args.do_sample and not DETERMINISTIC
@@ -182,17 +185,17 @@ def model_worker():
 
                 full_text += new_chunk
                 tokens_generated += len(new_chunk.split())
-                context += new_chunk
-
-                log_text = format_harmony_output(full_text) if HARMONY_MODE == "on" else full_text.strip()
-                log_preview = log_text if args.log_mode == "full" else log_text[:args.log_preview_length]
-                logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated}\n{log_preview}")
 
                 if DEBUG_MODEL_DATA:
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
                     all_attentions.append([a.cpu().tolist() for a in outputs.attentions])
 
-                if len(new_chunk.split()) < min(CHUNK_SIZE, max_tokens - tokens_generated):
+                # Only append to context if server-side multi_chunk is active
+                if multi_chunk:
+                    context += new_chunk
+
+                # Stop if generated fewer tokens than requested
+                if len(new_tokens) < min(CHUNK_SIZE, max_tokens - tokens_generated):
                     break
 
             finish_reason = "length" if tokens_generated >= max_tokens else "stop"
