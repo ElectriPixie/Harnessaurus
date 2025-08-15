@@ -81,24 +81,31 @@ class GPTModel:
         data = self._call_server(prompt, max_tokens)
         return data["choices"][0]["message"]["content"]
 
-    def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
-        """Harness-side iterative chunking"""
+    def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> str:
+        """Harness-side iterative chunking with sliding context"""
         generated_text = ""
-        for i in range(max_iterations):
-            recent_context = generated_text[-(self.max_context_chars - len(prompt)):]
-            current_prompt = prompt + recent_context
 
+        for i in range(max_iterations):
+            # Safe sliding window for recent context
+            recent_context = generated_text[-max(0, self.max_context_chars - len(prompt)):]
+
+            # Always include the original prompt; optionally flip recent context
+            current_prompt = prompt + (flip_negation(recent_context) if flip_negate else recent_context)
+
+            # Call the server for the next chunk
             data = self._call_server(current_prompt, max_chunk_tokens)
             chunk = data["choices"][0]["message"]["content"]
             finish_reason = data["choices"][0].get("finish_reason", "")
 
             generated_text += chunk
+
+            # Stop if model finished naturally
             if finish_reason != "length":
                 break
 
         return generated_text
 
-    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negotiate: int = 1) -> str:
+    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> str:
         """Iterative with optional negation flipping"""
         generated_text = ""
         current_prompt = prompt
@@ -113,7 +120,7 @@ class GPTModel:
             if finish_reason != "length":
                 break
 
-            current_prompt += flip_negation(chunk) if flip_negotiate else chunk
+            current_prompt += flip_negation(chunk) if flip_negate else chunk
 
         return generated_text
 
@@ -179,6 +186,7 @@ def run_prompt_test(
     max_mutations: int = 1,
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
+    flip_negate: bool = False,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -187,12 +195,16 @@ def run_prompt_test(
 
     # Run clean output always
     if iterator == 1:
-        clean_output = model.infer_iterative(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+        clean_output = model.infer_single_pass(
+            clean_prompt
         )
     elif iterator == 2:
+        clean_output = model.infer_iterative(
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
+        )
+    elif iterator == 3:
         clean_output = model.infer_iterative_exploit(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
         )
 
     if not include_mutated_output:
@@ -222,12 +234,16 @@ def run_prompt_test(
         mutated_prompt = pm.process_prompt(clean_prompt)
 
         if iterator == 1:
-            mutated_output = model.infer_iterative(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            mutated_output = model.infer_single_pass(
+                mutated_prompt
             )
         elif iterator == 2:
+            mutated_output = model.infer_iterative(
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
+            )
+        elif iterator == 3:
             mutated_output = model.infer_iterative_exploit(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
             )
 
         try:
