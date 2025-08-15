@@ -100,7 +100,7 @@ class HomoglyphSubstitutor(PluginBase):
         # add more datasets here
     ]
 
-    def __init__(self, path="/home/pixie/Code/Harnessaurus/data/homoglyphs/", datasets=None):
+    def __init__(self, path="/home/pixie/Code/Harnessaurus/data/homoglyphs/", datasets=None, replace_prob: float = 1.0):
         """
         Initialize the loader.
         Args:
@@ -111,9 +111,13 @@ class HomoglyphSubstitutor(PluginBase):
         self.path = path
         self.datasets = datasets or self.DEFAULT_DATASETS
         self.homoglyph_map = {}
+        self.replace_prob = replace_prob
         self.load_all_datasets()
         if(self.debug):
             self.debug_print_merged_map()  # Debug output of the final merged map
+
+    def update_probability(self, replace_prob: float = 1.0):
+        self.replace_prob = replace_prob
 
     def load_all_datasets(self):
         """
@@ -147,7 +151,7 @@ class HomoglyphSubstitutor(PluginBase):
                     mapping[base_char] = homoglyphs
         return mapping
 
-    def process_prompt(self, prompt: str, replace_prob: float = 1.0) -> str:
+    def process_prompt(self, prompt: str) -> str:
         """
         Convert a string using the current homoglyph map.
         Each character that exists in the map is randomly replaced by one of its homoglyphs
@@ -160,10 +164,11 @@ class HomoglyphSubstitutor(PluginBase):
         Returns:
             str: The string with some characters replaced by homoglyphs.
         """
+
         result_chars = []
 
         for ch in prompt:
-            if ch in self.homoglyph_map and random.random() < replace_prob:
+            if ch in self.homoglyph_map and random.random() < self.replace_prob:
                 result_chars.append(random.choice(self.homoglyph_map[ch]))
             else:
                 result_chars.append(ch)

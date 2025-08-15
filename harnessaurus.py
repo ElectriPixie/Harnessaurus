@@ -88,6 +88,12 @@ def main():
         action="store_true",
         help="Run the harness in iterative exploit mode. Prompts are chunked iteratively to test model vulnerabilities. Warning: this mode may be unstable."
     )
+    parser.add_argument(
+        "--homoglyph_replace_prob",
+        type=float,
+        default=1.0,
+        help="Probability of replacing characters with homoglyphs (0.0 to 1.0)"
+    )
 
     args = parser.parse_args()
     if args.single_pass:
@@ -113,6 +119,20 @@ def main():
         'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': args.forbidden_keywords},
         'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': args.evasive_phrases},
         'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs/homoglyphs.txt'},
+        'homoglyph_substitutor.HomoglyphSubstitutor': {
+        'path': "/home/pixie/Code/Harnessaurus/data/homoglyphs/",
+        'datasets': [
+            ("homoglyph_set", "homoglyphs.txt"),
+#            ("caligraphy_set", "caligraphy.txt"),
+#            ("diacritics_set", "diacritics.txt"),
+#            ("fancy_set", "fancy.txt"),
+#            ("fraktur_set", "fraktur.txt"),
+#            ("greek_set", "greek.txt"),
+#            ("mathematical_set", "mathematical.txt"),
+#            ("supplimental_set", "supplimental.txt")
+        ],
+        'replace_prob': args.homoglyph_replace_prob  # probability of replacing characters with homoglyphs
+        },
     }
 
     plugins = []
