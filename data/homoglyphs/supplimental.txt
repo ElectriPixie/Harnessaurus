@@ -1,0 +1,56 @@
+# Supplemental Mathematical Italic / Bold Homoglyphs
+# Only the variants missing from the first combined dataset
+
+a 𝑎 𝛂
+b 𝑏 𝛃
+c 𝑐
+d 𝑑 𝛿
+e 𝑒
+f 𝑓
+g 𝑔
+h 𝒽
+i 𝑖
+j 𝒿
+k 𝓀
+l 𝓁
+m 𝓂
+n 𝓃
+o 𝑜
+p 𝓅
+q 𝓆
+r 𝓇
+s 𝓈
+t 𝓉
+u 𝓊
+v 𝓋
+w 𝓌
+x 𝓍
+y 𝓎
+z 𝓏
+
+A 𝑨 𝛢
+B 𝑩
+C 𝑪
+D 𝑫
+E 𝑬
+F 𝑭
+G 𝑮
+H 𝑯
+I 𝑰 𝕀
+J 𝑱
+K 𝑲
+L 𝑳
+M 𝑴
+N 𝑵
+O 𝑶 𝕆
+P 𝑷
+Q 𝓠
+R 𝑹
+S 𝑺
+T 𝑻
+U 𝑼
+V 𝑽 𝕍
+W 𝑾 𝕎
+X 𝑿
+Y 𝒀 𝔜
+Z 𝒁

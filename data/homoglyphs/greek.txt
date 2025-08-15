@@ -1,0 +1,53 @@
+a α
+b 𝛃
+c 
+d 𝛿
+e 
+f 
+g 𝛾
+h 
+i ι
+j 
+k 
+l Λ
+m Μ
+n Ν
+o ο
+p Ρ
+q 
+r Ρ
+s Σ
+t Τ
+u Υ
+v 
+w 
+x Χ
+y Υ
+z Ζ
+
+A Α
+B Β
+C Ϲ
+D Δ
+E Ε
+F Φ
+G Γ
+H Η
+I Ι
+J 
+K Κ
+L Λ
+M Μ
+N Ν
+O Ο
+P Ρ
+Q 
+R Ρ
+S Σ
+T Τ
+U Υ
+V 
+W 
+X Χ
+Y Υ
+Z Ζ

@@ -1,0 +1,53 @@
+a а
+b в
+c с
+d ԁ
+e е
+f ғ
+g 
+h һ
+i і
+j ј
+k к
+l 
+m м
+n п
+o о
+p р
+q 
+r я
+s ѕ
+t т
+u ц
+v ѵ
+w 
+x х
+y у
+z 
+
+A А
+B В
+C С
+D Ԁ
+E Е
+F Ғ
+G 
+H Н
+I І
+J Ј
+K К
+L 
+M М
+N 
+O О
+P Р
+Q 
+R Я
+S Ѕ
+T Т
+U Ц
+V Ѵ
+W 
+X Х
+Y Ү
+Z 
