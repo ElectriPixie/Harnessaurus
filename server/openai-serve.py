@@ -13,6 +13,7 @@ import time
 import uuid
 import hashlib
 import argparse
+import math
 from datetime import datetime
 
 # --- CLI arguments ---
@@ -37,7 +38,7 @@ parser.add_argument("--log_preview_length", type=int, default=200)
 parser.add_argument(
     "--harmony_newlines",
     choices=["on", "off"],
-    default="off",  # default is no newlines
+    default="off",
     help="Add newline characters after Harmony special tokens (default: off)"
 )
 parser.add_argument(
@@ -46,19 +47,39 @@ parser.add_argument(
     default=False,
     help="If set, missing harmony channels are automatically filled with default text"
 )
+# --- NEW repetition control options ---
+parser.add_argument(
+    "--repetition_control",
+    choices=["on", "off"],
+    default="on",
+    help="Enable or disable repetition control (no-repeat-ngram + repetition penalty)"
+)
+parser.add_argument(
+    "--no_repeat_ngram_size",
+    type=int,
+    default=3,
+    help="Size of n-grams to avoid repeating (set to 0 to disable)"
+)
+parser.add_argument(
+    "--repetition_penalty",
+    type=float,
+    default=1.1,
+    help="Penalty factor for repetition (1.0 = no penalty)"
+)
+
 args = parser.parse_args()
 
 FILL_MISSING_CHANNELS = args.fill_missing_channels
 ADD_HARMONY_NEWLINES = args.harmony_newlines.lower() == "on"
-# --- Deterministic setup ---
 DETERMINISTIC = args.deterministic.lower() == "on"
+REPETITION_CONTROL = args.repetition_control.lower() == "on"
 
+# --- Deterministic setup ---
 if DETERMINISTIC:
     torch.manual_seed(args.seed)
     torch.use_deterministic_algorithms(True)
     logging.info(f"Deterministic mode ON | Seed: {args.seed}")
 else:
-    # Non-deterministic mode: allow PyTorch to use default RNG
     torch.use_deterministic_algorithms(False)
     logging.info("Deterministic mode OFF | Using PyTorch default RNG")
 
@@ -157,7 +178,6 @@ def model_worker():
             tokens_generated = 0
             all_hidden_states, all_attentions = [], []
 
-            # Determine max iterations for server-side chunking
             max_iterations = math.ceil(max_tokens / CHUNK_SIZE) if multi_chunk else 1
 
             for _ in range(max_iterations):
@@ -177,6 +197,13 @@ def model_worker():
                             "top_k": TOP_K,
                             "top_p": TOP_P
                         })
+                    # --- Apply repetition control if enabled ---
+                    if REPETITION_CONTROL:
+                        if args.no_repeat_ngram_size > 0:
+                            generate_kwargs["no_repeat_ngram_size"] = args.no_repeat_ngram_size
+                        if args.repetition_penalty != 1.0:
+                            generate_kwargs["repetition_penalty"] = args.repetition_penalty
+
                     outputs = model.generate(**generate_kwargs, **inputs)
 
                 prev_len = inputs.input_ids.shape[1]
@@ -190,11 +217,9 @@ def model_worker():
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
                     all_attentions.append([a.cpu().tolist() for a in outputs.attentions])
 
-                # Only append to context if server-side multi_chunk is active
                 if multi_chunk:
                     context += new_chunk
 
-                # Stop if generated fewer tokens than requested
                 if len(new_tokens) < min(CHUNK_SIZE, max_tokens - tokens_generated):
                     break
 
