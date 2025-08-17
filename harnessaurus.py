@@ -70,6 +70,7 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
     parser.add_argument('--max_mutations', type=int, default=1)
+    parser.add_argument('--mutate_until_accepted', action='store_true', default=False, help='Causes mutator to stop before max_mutations if the refusal detector sees and accepted response')
     parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
     parser.add_argument('--skip_lines', type=int, default=0)
     group = parser.add_mutually_exclusive_group()
@@ -214,6 +215,7 @@ def main():
                     include_mutated_output=args.use_mutated,
                     max_mutations=args.max_mutations,
                     flip_negate=args.flip_negate,
+                    loop=args.mutate_until_accepted
                     iterator=iterator
                 )
 
