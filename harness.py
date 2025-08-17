@@ -188,6 +188,7 @@ def run_prompt_test(
     include_mutated_output: bool = True,  # toggle mutation runs on/off
     flip_negate: bool = False,
     rerun_clean_promt: bool = False,
+    run_dir: str = None,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -224,6 +225,7 @@ def run_prompt_test(
             'analysis_mutated': {},
             #'output_diff': '',
             'mutation_iteration': 0,
+            'run_dir': run_dir,
         }
         aggregator.add_record(record)
         results.append(record)
