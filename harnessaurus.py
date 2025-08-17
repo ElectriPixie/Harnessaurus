@@ -195,8 +195,8 @@ def main():
         crit_writer.writeheader()
 
         for i, prompt in enumerate(prompts, 1):
-            if skip_lines:
-                if i < skip_lines:
+            if args.skip_lines:
+                if i < args.skip_lines:
                     continue
             print(f"[Processing] Prompt: {prompt} {i}/{len(prompts)}...")
 

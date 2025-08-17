@@ -187,6 +187,7 @@ def run_prompt_test(
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
     flip_negate: bool = False,
+    rerun_clean_promt: bool = False,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -228,7 +229,12 @@ def run_prompt_test(
         results.append(record)
         return results
 
-    iterations = max_mutations if loop else max_mutations  # we'll handle breaking manually below if loop=False
+    iterations = max_mutations
+    if not rerun_clean_promt:
+        analysis_clean = {}
+        for plugin in plugins:
+            plugin_name = type(plugin).__name__
+            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
 
     for mutation_count in range(1, iterations + 1):
         mutated_prompt = pm.process_prompt(clean_prompt)
@@ -247,12 +253,14 @@ def run_prompt_test(
             )
 
         try:
-            analysis_clean = {}
             analysis_mutated = {}
+            if rerun_clean_promt:
+                analysis_clean = {}
 
             for plugin in plugins:
                 plugin_name = type(plugin).__name__
-                analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+                if rerun_clean_promt:
+                    analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
                 analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
 
             record = {
