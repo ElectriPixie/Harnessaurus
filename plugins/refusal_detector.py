@@ -28,16 +28,16 @@ class RefusalDetector(PluginBase):
         output_lower = output.lower()
         for pattern in self.REFUSAL_PATTERNS:
             if re.search(pattern, output_lower):
-                print("Refusal Detector: Refused by regex pattern")
+                print(f"Prompt: {prompt}\nRefusal Detector - Refused by regex pattern")
                 return {"status": "refused"}
 
         for phrase in self.REFUSAL_PHRASES:
             for line in output_lower.splitlines():
                 if self._fuzzy_match(phrase.lower(), line.strip()):
-                    print("Refusal Detector: Refused by fuzzy match")
+                    print(f"Prompt: {prompt}\nRefusal Detector - Refused by fuzzy match")
                     return {"status": "refused"}
 
-        print("Refusal Detector: Accepted")
+        print(f"Prompt: {prompt}\nRefusal Detector - Accepted")
         return {"status": "accepted"}
 
     def process_prompt(self, prompt: str) -> str:
