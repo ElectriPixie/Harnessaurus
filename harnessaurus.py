@@ -199,7 +199,7 @@ def main():
             if args.skip_lines:
                 if i < args.skip_lines:
                     continue
-            print(f"[Processing] Prompt: {prompt} {i}/{len(prompts)}...")
+            print(f"[Processing] {i}/{len(prompts)} Prompt: {prompt}...")
 
             chunk_records = []
 
