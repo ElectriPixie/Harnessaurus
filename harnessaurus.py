@@ -215,7 +215,7 @@ def main():
                     include_mutated_output=args.use_mutated,
                     max_mutations=args.max_mutations,
                     flip_negate=args.flip_negate,
-                    loop=args.mutate_until_accepted
+                    loop=args.mutate_until_accepted,
                     iterator=iterator
                 )
 
