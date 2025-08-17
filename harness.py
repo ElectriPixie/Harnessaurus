@@ -129,9 +129,28 @@ class PluginManager:
         self.plugins = plugins
         self.channel_map = channel_map or {}
 
-    def process_prompt(self, prompt: str) -> str:
-        for plugin in self.plugins:
+    def process_prompt(self, prompt: str, plugins_to_apply: Optional[List[PluginBase]] = None) -> str:
+        """
+        Apply prompt mutators.
+
+        Args:
+            prompt: The original prompt
+            plugins_to_apply: 
+                - None: use self.plugins
+                - empty list: apply no plugins
+                - non-empty list: apply only these plugins
+
+        Returns:
+            str: Mutated prompt
+        """
+        if plugins_to_apply is None:
+            active_plugins = self.plugins
+        else:
+            active_plugins = plugins_to_apply  # could be empty list, which is valid
+
+        for plugin in active_plugins:
             prompt = plugin.process_prompt(prompt)
+
         return prompt
 
     def process_output(self, prompt: str, output: str, plugin_name: str) -> Optional[object]:
