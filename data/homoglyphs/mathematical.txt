@@ -1,0 +1,70 @@
+# Format: LatinChar  HomoglyphChar1 HomoglyphChar2 ...
+# Mathematical variants: bold, double-struck, bold-italic, monospace
+
+a 𝗮 𝖆 𝕒 𝐚 𝘢 𝚊
+b 𝗯 𝖇 𝕓 𝐛 𝘣 𝚋
+c 𝗰 𝖈 𝕔 𝐜 𝘤 𝚜
+d 𝗱 𝖉 𝕕 𝐝 𝘥 𝚍
+e 𝗲 𝖊 𝕖 𝐞 𝘦 𝚎
+f 𝗳 𝖋 𝕗 𝐟 𝘧 𝚏
+g 𝗴 𝖌 𝕘 𝐠 𝘨 𝚐
+h 𝗵 𝖍 𝕙 𝐡 𝘩 𝚑
+i 𝗶 𝖎 𝕚 𝐢 𝘪 𝚒
+j 𝗷 𝖏 𝕛 𝐣 𝘫 𝚓
+k 𝗸 𝖐 𝕜 𝐤 𝘬 𝚔
+l 𝗹 𝖑 𝕝 𝐥 𝘭 𝚕
+m 𝗺 𝖒 𝕞 𝐦 𝘮 𝚖
+n 𝗻 𝖓 𝕟 𝐧 𝘯 𝚗
+o 𝗼 𝖔 𝕠 𝐨 𝘰 𝚘
+p 𝗽 𝖕 𝕡 𝐩 𝘱 𝚙
+q 𝗾 𝖖 𝕢 𝐪 𝘲 𝚚
+r 𝗿 𝖗 𝕣 𝐫 𝘳 𝚛
+s 𝘀 𝖘 𝕤 𝐬 𝘴 𝚜
+t 𝘁 𝖙 𝕥 𝐭 𝘵 𝚝
+u 𝘂 𝖚 𝕦 𝐮 𝘶 𝚞
+v 𝘃 𝖛 𝕧 𝐯 𝘷 𝚟
+w 𝘄 𝖜 𝕨 𝐰 𝘸 𝚠
+x 𝘅 𝖝 𝕩 𝐱 𝘹 𝚡
+y 𝘆 𝖞 𝕪 𝐲 𝘺 𝚢
+z 𝘇 𝖟 𝕫 𝐳 𝘻 𝚣
+
+A 𝗔 𝖆 𝕬 𝐀 𝘈 𝚨
+B 𝗕 𝖇 𝕭 𝐁 𝘉 𝚩
+C 𝗖 𝖈 𝕮 𝐂 𝘊 𝚪
+D 𝗗 𝖉 𝕯 𝐃 𝘋 𝚫
+E 𝗘 𝖊 𝕰 𝐄 𝘌 𝚬
+F 𝗙 𝖋 𝕱 𝐅 𝘍 𝚭
+G 𝗚 𝖌 𝕲 𝐆 𝘎 𝚮
+H 𝗛 𝖍 𝕳 𝐇 𝘏 𝚯
+I 𝗜 𝖎 𝕴 𝐈 𝘐 𝚰
+J 𝗝 𝖏 𝕵 𝐉 𝘑 𝚱
+K 𝗞 𝖐 𝕶 𝐊 𝘒 𝚲
+L 𝗟 𝖑 𝕷 𝐋 𝘓 𝚳
+M 𝗠 𝖒 𝕸 𝐌 𝘔 𝚴
+N 𝗡 𝖓 𝕹 𝐍 𝘕 𝚵
+O 𝗢 𝖔 𝕺 𝐎 𝘖 𝚶
+P 𝗣 𝖕 𝕻 𝐏 𝘗 𝚷
+Q 𝗤 𝖖 𝕼 𝐐 𝘘 𝚸
+R 𝗥 𝖗 𝕽 𝐑 𝘙 𝚹
+S 𝗦 𝖘 𝕾 𝐒 𝘚 𝚺
+T 𝗧 𝖙 𝕿 𝐓 𝘛 𝚻
+U 𝗨 𝖚 𝖀 𝐔 𝘜 𝚼
+V 𝗩 𝖛 𝖁 𝐕 𝘝 𝚽
+W 𝗪 𝖜 𝖂 𝐖 𝘞 𝚾
+X 𝗫 𝖝 𝖃 𝐗 𝘟 𝚿
+Y 𝗬 𝖞 𝖄 𝐘 𝘠 𝛀
+Z 𝗭 𝖟 𝖅 𝐙 𝘡 𝛁
+
+# Format: Digit  Homoglyph1 Homoglyph2 ...
+# Mathematical variants: bold, double-struck, bold-italic, monospace
+
+0 𝟬 𝟘 𝟢 𝟶 𝟎
+1 𝟭 𝟙 𝟣 𝟷 𝟏
+2 𝟮 𝟚 𝟤 𝟸 𝟐
+3 𝟯 𝟛 𝟥 𝟹 𝟑
+4 𝟰 𝟜 𝟦 𝟺 𝟒
+5 𝟱 𝟝 𝟧 𝟻 𝟓
+6 𝟲 𝟞 𝟨 𝟼 𝟔
+7 𝟳 𝟟 𝟩 𝟽 𝟕
+8 𝟴 𝟠 𝟪 𝟾 𝟖
+9 𝟵 𝟡 𝟫 𝟿 𝟗

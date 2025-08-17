@@ -55,81 +55,72 @@ def flip_negation(text):
     return text
 
 class GPTModel:
-    def __init__(self, server_url: str, model_name: str = "llama", max_context_chars: int = 2000):
+    def __init__(self, server_url: str, model_name: str = "llama", max_context_chars: int = 2000, multi_chunk: bool = False):
         print(f"Using llama-server at {server_url} for model '{model_name}'")
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
-        self.max_context_chars = max_context_chars  # rough max prompt length in chars
+        self.max_context_chars = max_context_chars
+        self.multi_chunk = multi_chunk  # server-side chunking flag
     
-    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 20, flip_negotiate: int = 1,) -> str:
+    def _call_server(self, prompt: str, max_tokens: int = 256) -> Dict:
         url = f"{self.server_url}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0,
+            "multi_chunk": self.multi_chunk,  # inform server
+        }
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        return resp.json()
 
-        current_prompt = prompt
-        full_output = ""
-        for i in range(max_iterations):
-            payload = {
-                "model": self.model_name,
-                "messages": [{"role": "user", "content": current_prompt}],
-                "max_tokens": max_chunk_tokens,
-                "temperature": 0,
-            }
+    def infer_single_pass(self, prompt: str, max_tokens: int = 4096) -> str:
+        """Single-pass generation; server handles full text in one call"""
+        data = self._call_server(prompt, max_tokens)
+        return data["choices"][0]["message"]["content"]
 
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                data = response.json()
-                chunk = data["choices"][0]["message"]["content"]
-
-                full_output += chunk
-
-                finish_reason = data["choices"][0].get("finish_reason", "")
-                if finish_reason != "length":
-                    break
-
-                if(flip_negotiate):
-                    current_prompt += flip_negation(chunk)
-                else:
-                    current_prompt += chunk
-            except Exception as e:
-                print(f"Error during iterative generation at chunk {i+1}: {e}")
-                break
-
-        return full_output
-
-    def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10) -> str:
-        url = f"{self.server_url}/v1/chat/completions"
-        headers = {"Content-Type": "application/json"}
-
-        initial_prompt = prompt
+    def infer_iterative(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> str:
+        """Harness-side iterative chunking with sliding context"""
         generated_text = ""
 
         for i in range(max_iterations):
-            recent_context = generated_text[-(self.max_context_chars - len(initial_prompt)):]
-            current_prompt = initial_prompt + recent_context
+            # Safe sliding window for recent context
+            recent_context = generated_text[-max(0, self.max_context_chars - len(prompt)):]
 
-            payload = {
-                "model": self.model_name,
-                "messages": [{"role": "user", "content": current_prompt}],
-                "max_tokens": max_chunk_tokens,
-                "temperature": 0,
-            }
+            # Always include the original prompt; optionally flip recent context
+            current_prompt = prompt + (flip_negation(recent_context) if flip_negate else recent_context)
 
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                data = response.json()
-                chunk = data["choices"][0]["message"]["content"]
+            # Call the server for the next chunk
+            data = self._call_server(current_prompt, max_chunk_tokens)
+            chunk = data["choices"][0]["message"]["content"]
+            finish_reason = data["choices"][0].get("finish_reason", "")
 
-                generated_text += chunk
+            generated_text += chunk
 
-                finish_reason = data["choices"][0].get("finish_reason", "")
-                if finish_reason != "length":
-                    break
-
-            except Exception as e:
-                print(f"Error during iterative generation at chunk {i+1}: {e}")
+            # Stop if model finished naturally
+            if finish_reason != "length":
                 break
+
+        return generated_text
+
+    def infer_iterative_exploit(self, prompt: str, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> str:
+        """Iterative with optional negation flipping"""
+        generated_text = ""
+        current_prompt = prompt
+
+        for i in range(max_iterations):
+            data = self._call_server(current_prompt, max_chunk_tokens)
+            chunk = data["choices"][0]["message"]["content"]
+            finish_reason = data["choices"][0].get("finish_reason", "")
+
+            generated_text += chunk
+
+            if finish_reason != "length":
+                break
+
+            current_prompt += flip_negation(chunk) if flip_negate else chunk
 
         return generated_text
 
@@ -195,6 +186,8 @@ def run_prompt_test(
     max_mutations: int = 1,
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
+    flip_negate: bool = False,
+    rerun_clean_promt: bool = False,
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -203,12 +196,16 @@ def run_prompt_test(
 
     # Run clean output always
     if iterator == 1:
-        clean_output = model.infer_iterative(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+        clean_output = model.infer_single_pass(
+            clean_prompt
         )
     elif iterator == 2:
+        clean_output = model.infer_iterative(
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
+        )
+    elif iterator == 3:
         clean_output = model.infer_iterative_exploit(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
         )
 
     if not include_mutated_output:
@@ -232,27 +229,38 @@ def run_prompt_test(
         results.append(record)
         return results
 
-    iterations = max_mutations if loop else max_mutations  # we'll handle breaking manually below if loop=False
+    iterations = max_mutations
+    if not rerun_clean_promt:
+        analysis_clean = {}
+        for plugin in plugins:
+            plugin_name = type(plugin).__name__
+            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
 
     for mutation_count in range(1, iterations + 1):
         mutated_prompt = pm.process_prompt(clean_prompt)
 
         if iterator == 1:
-            mutated_output = model.infer_iterative(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+            mutated_output = model.infer_single_pass(
+                mutated_prompt
             )
         elif iterator == 2:
+            mutated_output = model.infer_iterative(
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
+            )
+        elif iterator == 3:
             mutated_output = model.infer_iterative_exploit(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations
+                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
             )
 
         try:
-            analysis_clean = {}
             analysis_mutated = {}
+            if rerun_clean_promt:
+                analysis_clean = {}
 
             for plugin in plugins:
                 plugin_name = type(plugin).__name__
-                analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+                if rerun_clean_promt:
+                    analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
                 analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
 
             record = {

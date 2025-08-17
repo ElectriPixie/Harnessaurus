@@ -13,6 +13,7 @@ import time
 import uuid
 import hashlib
 import argparse
+import math
 from datetime import datetime
 
 # --- CLI arguments ---
@@ -21,7 +22,7 @@ parser.add_argument("--model_id", type=str, default="/data/AI/Models/gpt-oss-20b
 parser.add_argument("--max_tokens", type=int, default=4096)
 parser.add_argument("--chunk_size", type=int, default=1024)
 parser.add_argument("--num_threads", type=int, default=4)
-parser.add_argument("--multi_chunk", action="store_true")
+parser.add_argument("--multi_chunk", action="store_true", default=False)
 parser.add_argument("--harmony", choices=["off", "on"], default="on")
 parser.add_argument("--debug_model_data", choices=["off", "on"], default="off")
 parser.add_argument("--port", type=int, default=6589)
@@ -37,21 +38,48 @@ parser.add_argument("--log_preview_length", type=int, default=200)
 parser.add_argument(
     "--harmony_newlines",
     choices=["on", "off"],
-    default="off",  # default is no newlines
+    default="off",
     help="Add newline characters after Harmony special tokens (default: off)"
 )
+parser.add_argument(
+    "--fill_missing_channels",
+    action="store_true",
+    default=False,
+    help="If set, missing harmony channels are automatically filled with default text"
+)
+# --- NEW repetition control options ---
+parser.add_argument(
+    "--repetition_control",
+    choices=["on", "off"],
+    default="on",
+    help="Enable or disable repetition control (no-repeat-ngram + repetition penalty)"
+)
+parser.add_argument(
+    "--no_repeat_ngram_size",
+    type=int,
+    default=3,
+    help="Size of n-grams to avoid repeating (set to 0 to disable)"
+)
+parser.add_argument(
+    "--repetition_penalty",
+    type=float,
+    default=1.1,
+    help="Penalty factor for repetition (1.0 = no penalty)"
+)
+
 args = parser.parse_args()
 
+FILL_MISSING_CHANNELS = args.fill_missing_channels
 ADD_HARMONY_NEWLINES = args.harmony_newlines.lower() == "on"
-# --- Deterministic setup ---
 DETERMINISTIC = args.deterministic.lower() == "on"
+REPETITION_CONTROL = args.repetition_control.lower() == "on"
 
+# --- Deterministic setup ---
 if DETERMINISTIC:
     torch.manual_seed(args.seed)
     torch.use_deterministic_algorithms(True)
     logging.info(f"Deterministic mode ON | Seed: {args.seed}")
 else:
-    # Non-deterministic mode: allow PyTorch to use default RNG
     torch.use_deterministic_algorithms(False)
     logging.info("Deterministic mode OFF | Using PyTorch default RNG")
 
@@ -122,13 +150,16 @@ def format_harmony_output(raw_text: str) -> str:
         if "<|message|>" in part:
             name, content = part.split("<|message|>", 1)
             channels[name.strip()] = content.strip()
-    if "analysis" not in channels or not channels["analysis"]:
-        channels["analysis"] = "We must refuse."
-    if "final" not in channels or not channels["final"]:
-        channels["final"] = "I’m sorry, but I can’t help with that."
+
+    if FILL_MISSING_CHANNELS:
+        if "analysis" not in channels or not channels["analysis"]:
+            channels["analysis"] = "We must refuse."
+        if "final" not in channels or not channels["final"]:
+            channels["final"] = "I’m sorry, but I can’t help with that."
+
     assistant_text = f"<|role|>assistant{sep}"
-    for ch_name in ["analysis", "final"]:
-        assistant_text += f"<|channel|>{ch_name}<|message|>{channels[ch_name]}{sep}"
+    for ch_name, content in channels.items():
+        assistant_text += f"<|channel|>{ch_name}<|message|>{content}{sep}"
     assistant_text += f"<|/role|>{sep}<|return|>"
     return assistant_text
 
@@ -147,7 +178,9 @@ def model_worker():
             tokens_generated = 0
             all_hidden_states, all_attentions = [], []
 
-            while tokens_generated < max_tokens:
+            max_iterations = math.ceil(max_tokens / CHUNK_SIZE) if multi_chunk else 1
+
+            for _ in range(max_iterations):
                 inputs = tokenizer(context, return_tensors="pt").to(model.device)
                 with torch.no_grad():
                     do_sample_flag = args.do_sample and not DETERMINISTIC
@@ -164,6 +197,13 @@ def model_worker():
                             "top_k": TOP_K,
                             "top_p": TOP_P
                         })
+                    # --- Apply repetition control if enabled ---
+                    if REPETITION_CONTROL:
+                        if args.no_repeat_ngram_size > 0:
+                            generate_kwargs["no_repeat_ngram_size"] = args.no_repeat_ngram_size
+                        if args.repetition_penalty != 1.0:
+                            generate_kwargs["repetition_penalty"] = args.repetition_penalty
+
                     outputs = model.generate(**generate_kwargs, **inputs)
 
                 prev_len = inputs.input_ids.shape[1]
@@ -172,17 +212,15 @@ def model_worker():
 
                 full_text += new_chunk
                 tokens_generated += len(new_chunk.split())
-                context += new_chunk
-
-                log_text = format_harmony_output(full_text) if HARMONY_MODE == "on" else full_text.strip()
-                log_preview = log_text if args.log_mode == "full" else log_text[:args.log_preview_length]
-                logger.info(f"[Worker] Job {job_id} | Chunk generated | Tokens so far: {tokens_generated}\n{log_preview}")
 
                 if DEBUG_MODEL_DATA:
                     all_hidden_states.append([h.cpu().tolist() for h in outputs.hidden_states])
                     all_attentions.append([a.cpu().tolist() for a in outputs.attentions])
 
-                if len(new_chunk.split()) < min(CHUNK_SIZE, max_tokens - tokens_generated):
+                if multi_chunk:
+                    context += new_chunk
+
+                if len(new_tokens) < min(CHUNK_SIZE, max_tokens - tokens_generated):
                     break
 
             finish_reason = "length" if tokens_generated >= max_tokens else "stop"

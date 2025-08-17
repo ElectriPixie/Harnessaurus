@@ -68,9 +68,47 @@ def main():
     parser.add_argument('--max_tokens_per_chunk', type=int, default=256)
     parser.add_argument('--max_iterations', type=int, default=10)
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=True)
+    parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
+    parser.add_argument('--max_mutations', type=int, default=1)
+    parser.add_argument('--mutate_until_accepted', action='store_true', default=False, help='Causes mutator to stop before max_mutations if the refusal detector sees and accepted response')
+    parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
+    parser.add_argument('--skip_lines', type=int, default=0)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--single_pass",
+        action="store_true",
+        help="Run the harness in single-pass mode. Each prompt is processed once; no iterative mutation is applied."
+    )
+    group.add_argument(
+        "--iterative",
+        action="store_true",
+        help="Run the harness in iterative mode. Prompts are chunked iteratively to test model vulnerabilities."
+    )
+    group.add_argument(
+        "--iterative_exploit",
+        action="store_true",
+        help="Run the harness in iterative exploit mode. Prompts are chunked iteratively to test model vulnerabilities. Warning: this mode may be unstable."
+    )
+    parser.add_argument(
+        "--homoglyph_replace_prob",
+        type=float,
+        default=1.0,
+        help="Probability of replacing characters with homoglyphs (0.0 to 1.0)"
+    )
 
     args = parser.parse_args()
+    if args.single_pass:
+        iterator = 1
+        print("Running in single-pass mode...")
+    elif args.iterative:
+        print(f"Running in iterative mode for up to {args.max_iterations} iterations...")
+        iterator = 2
+    elif args.iterative_exploit:
+        print(f"Running in iterative exploit mode for up to {args.max_iterations} iterations...")
+        iterator = 3
+    else:
+        iterator = 1
+        print("No mode selected; defaulting to single-pass.")
     DEBUG = args.debug
 
     debug_print("[Main] Starting with debug ON")
@@ -81,7 +119,21 @@ def main():
     plugin_param_map = {
         'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': args.forbidden_keywords},
         'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': args.evasive_phrases},
-        'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs.txt'},
+        'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs/homoglyphs.txt'},
+        'homoglyph_substitutor.HomoglyphSubstitutor': {
+        'path': "/home/pixie/Code/Harnessaurus/data/homoglyphs/",
+        'datasets': [
+            ("homoglyph_set", "homoglyphs.txt"),
+#            ("caligraphy_set", "caligraphy.txt"),
+#            ("diacritics_set", "diacritics.txt"),
+#            ("fancy_set", "fancy.txt"),
+#            ("fraktur_set", "fraktur.txt"),
+#            ("greek_set", "greek.txt"),
+#            ("mathematical_set", "mathematical.txt"),
+#            ("supplimental_set", "supplimental.txt")
+        ],
+        'replace_prob': args.homoglyph_replace_prob  # probability of replacing characters with homoglyphs
+        },
     }
 
     plugins = []
@@ -144,7 +196,10 @@ def main():
         crit_writer.writeheader()
 
         for i, prompt in enumerate(prompts, 1):
-            print(f"[Processing] Prompt {i}/{len(prompts)}...")
+            if args.skip_lines:
+                if i < args.skip_lines:
+                    continue
+            print(f"[Processing] {i}/{len(prompts)} Prompt: {prompt}...")
 
             chunk_records = []
 
@@ -158,7 +213,10 @@ def main():
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
                     include_mutated_output=args.use_mutated,
-                    iterator=1
+                    max_mutations=args.max_mutations,
+                    flip_negate=args.flip_negate,
+                    loop=not args.mutate_until_accepted,
+                    iterator=iterator
                 )
 
                 if not isinstance(rec_list, list):
