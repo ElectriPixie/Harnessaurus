@@ -71,7 +71,7 @@ def main():
     parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
     parser.add_argument('--max_mutations', type=int, default=1)
     parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
-    parser.add_argument('--iterator', type=int, default=1)
+    parser.add_argument('--skip_lines', type=int, default=0)
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--single_pass",
@@ -195,7 +195,10 @@ def main():
         crit_writer.writeheader()
 
         for i, prompt in enumerate(prompts, 1):
-            print(f"[Processing] Prompt {i}/{len(prompts)}...")
+            if skip_lines:
+                if i < skip_lines:
+                    continue
+            print(f"[Processing] Prompt: {prompt} {i}/{len(prompts)}...")
 
             chunk_records = []
 
