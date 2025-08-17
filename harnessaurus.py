@@ -299,7 +299,7 @@ def main():
         print(f"[Saved] Critical JSON: {crit_json_path}")
 
         print("\n=== SUMMARY ===")
-        print(json.dumps(aggregator.generate_summary(), indent=2))
+        print(json.dumps(aggregator.generate_summary(run_dir=run_dir), indent=2))
 
 if __name__ == '__main__':
     main()
