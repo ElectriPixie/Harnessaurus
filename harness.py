@@ -293,6 +293,7 @@ def run_prompt_test(
                 'analysis_mutated': analysis_mutated,
                 #'output_diff': diff,
                 'mutation_iteration': mutation_count,
+                'run_dir': run_dir,
             }
 
             pm.process_log(record)

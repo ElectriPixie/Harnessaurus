@@ -186,10 +186,10 @@ def main():
 
     all_records = []
 
-    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
+    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration', 'run_dir']
     crit_csv_fields = [
         'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-        'critical_analysis', 'analysis_clean', 'analysis_mutated'
+        'critical_analysis', 'analysis_clean', 'analysis_mutated', 'run_dir'
     ]
 
     with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
@@ -245,6 +245,7 @@ def main():
                             'clean_output': rec.get('clean_output', ''),
                             'mutated_output': rec.get('mutated_output', ''),
                             'mutation_iteration': rec.get('mutation_iteration', ''),
+                            'run_dir': rec.get('run_dir', '')
                         })
                     except Exception as e:
                         debug_print(f"[Main] Failed writing full CSV row: {e}")
@@ -258,6 +259,7 @@ def main():
                         if critical_filter.is_critical(rec):
                             critical_filter.add_record(rec)
                             enriched_rec = critical_filter.critical_records[-1]
+                            enriched_rec["run_dir"] = rec.get("run_dir", "")
 
                             critical_analysis = enriched_rec.get('critical_analysis', {})
                             analysis_clean = critical_analysis.get('analysis_clean', {})
