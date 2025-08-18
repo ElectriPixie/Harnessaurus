@@ -49,7 +49,7 @@ class ResultAggregator:
                     if isinstance(val, (int, float)):
                         self.plugin_numeric_metrics[plugin_name][metric].append(val)
 
-    def generate_summary(self):
+    def generate_summary(self, run_dir: str = None):
         total = self.total_prompts or 1
 
         avg_metrics = {}
@@ -66,7 +66,7 @@ class ResultAggregator:
             for (plugin, key), count in self.plugin_suspicious.items()
         }
 
-        return {
+        summary = {
             'total_prompts_tested': self.total_prompts,
             'plugin_flag_counts': dict(self.plugin_flags),
             'plugin_suspicious_counts': suspicious_counts,
@@ -74,6 +74,19 @@ class ResultAggregator:
             'plugin_suspicious_percentages': {k: (v / total * 100) for k, v in suspicious_counts.items()},
             'plugin_average_metrics': avg_metrics,
         }
+
+        # If run_dir is provided, save summary.json there
+        if run_dir:
+            try:
+                os.makedirs(run_dir, exist_ok=True)
+                summary_path = os.path.join(run_dir, "summary.json")
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, indent=2, ensure_ascii=False)
+                print(f"[ResultAggregator] Saved summary.json: {summary_path}")
+            except Exception as e:
+                print(f"[ResultAggregator] Failed to save summary.json: {e}")
+
+        return summary
 
     def save_csv(self, filepath: str):
         try:

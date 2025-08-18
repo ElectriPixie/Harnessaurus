@@ -116,6 +116,22 @@ def main():
     prompts = load_list_from_file(args.prompts)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
+    # Create a single folder for this run
+    run_dir = os.path.join("reports", f"redteam_run_{timestamp}")
+    os.makedirs(run_dir, exist_ok=True)
+
+    # Paths for outputs
+    full_csv_path = os.path.join(run_dir, 'redteam_results_full.csv')
+    full_json_path = os.path.join(run_dir, 'redteam_results_full.json')
+    crit_csv_path = os.path.join(run_dir, 'redteam_critical.csv')
+    crit_json_path = os.path.join(run_dir, 'redteam_critical.json')
+    args_json_path = os.path.join(run_dir, 'run_arguments.json')
+
+    # Save run arguments
+    with open(args_json_path, 'w', encoding='utf-8') as f:
+        json.dump(vars(args), f, indent=2, ensure_ascii=False)
+    print(f"[Saved] Run arguments: {args_json_path}")
+
     plugin_param_map = {
         'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': args.forbidden_keywords},
         'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': args.evasive_phrases},
@@ -132,7 +148,7 @@ def main():
 #            ("mathematical_set", "mathematical.txt"),
 #            ("supplimental_set", "supplimental.txt")
         ],
-        'replace_prob': args.homoglyph_replace_prob  # probability of replacing characters with homoglyphs
+        'replace_prob': args.homoglyph_replace_prob
         },
     }
 
@@ -170,18 +186,10 @@ def main():
 
     all_records = []
 
-    report_dir = "reports"
-    os.makedirs(report_dir, exist_ok=True)
-
-    full_csv_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.csv')
-    full_json_path = os.path.join(report_dir, f'redteam_results_{timestamp}_full.json')
-    crit_csv_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.csv')
-    crit_json_path = os.path.join(report_dir, f'redteam_critical_{timestamp}.json')
-
-    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration']
+    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration', 'run_dir']
     crit_csv_fields = [
         'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-        'critical_analysis', 'analysis_clean', 'analysis_mutated'
+        'critical_analysis', 'analysis_clean', 'analysis_mutated', 'run_dir'
     ]
 
     with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
@@ -196,9 +204,8 @@ def main():
         crit_writer.writeheader()
 
         for i, prompt in enumerate(prompts, 1):
-            if args.skip_lines:
-                if i < args.skip_lines:
-                    continue
+            if args.skip_lines and i < args.skip_lines:
+                continue
             print(f"[Processing] {i}/{len(prompts)} Prompt: {prompt}...")
 
             chunk_records = []
@@ -216,7 +223,8 @@ def main():
                     max_mutations=args.max_mutations,
                     flip_negate=args.flip_negate,
                     loop=not args.mutate_until_accepted,
-                    iterator=iterator
+                    iterator=iterator,
+                    run_dir=run_dir
                 )
 
                 if not isinstance(rec_list, list):
@@ -237,6 +245,7 @@ def main():
                             'clean_output': rec.get('clean_output', ''),
                             'mutated_output': rec.get('mutated_output', ''),
                             'mutation_iteration': rec.get('mutation_iteration', ''),
+                            'run_dir': rec.get('run_dir', '')
                         })
                     except Exception as e:
                         debug_print(f"[Main] Failed writing full CSV row: {e}")
@@ -250,6 +259,7 @@ def main():
                         if critical_filter.is_critical(rec):
                             critical_filter.add_record(rec)
                             enriched_rec = critical_filter.critical_records[-1]
+                            enriched_rec["run_dir"] = rec.get("run_dir", "")
 
                             critical_analysis = enriched_rec.get('critical_analysis', {})
                             analysis_clean = critical_analysis.get('analysis_clean', {})
@@ -291,7 +301,7 @@ def main():
         print(f"[Saved] Critical JSON: {crit_json_path}")
 
         print("\n=== SUMMARY ===")
-        print(json.dumps(aggregator.generate_summary(), indent=2))
+        print(json.dumps(aggregator.generate_summary(run_dir=run_dir), indent=2))
 
 if __name__ == '__main__':
     main()
