@@ -61,6 +61,7 @@ def main():
                             'sandbagging_detector.SandbaggingDetector',
                             'hidden_motivation_detector.HiddenMotivationDetector',
                             'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
+                            'rationalization_mutator.RationalizationMutator',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--server_url', help='llama-server base URL, e.g. http://localhost:6589', default="http://localhost:6589")
@@ -71,6 +72,13 @@ def main():
     parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
     parser.add_argument('--max_mutations', type=int, default=1)
     parser.add_argument('--mutate_until_accepted', action='store_true', default=False, help='Causes mutator to stop before max_mutations if the refusal detector sees and accepted response')
+    parser.add_argument(
+        '--mutators',
+        nargs='+',                # accept one or more values
+        required=False,
+        default=[],               # default to empty list if not provided
+        help='List of mutator class names to apply'
+    )
     parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
     parser.add_argument('--skip_lines', type=int, default=0)
     group = parser.add_mutually_exclusive_group()
@@ -110,6 +118,15 @@ def main():
         iterator = 1
         print("No mode selected; defaulting to single-pass.")
     DEBUG = args.debug
+    RED = "\033[31m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    MAGENTA = "\033[35m"
+    YELLOW  = "\033[33m"
+    BOLD = "\033[1m"
+    DIM  = "\033[2m"
+    RESET = "\033[0m"
 
     debug_print("[Main] Starting with debug ON")
 
@@ -206,7 +223,7 @@ def main():
         for i, prompt in enumerate(prompts, 1):
             if args.skip_lines and i < args.skip_lines:
                 continue
-            print(f"[Processing] {i}/{len(prompts)} Prompt: {prompt}...")
+            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(prompts)} {BLUE}Prompt: {GREEN}{prompt}{RESET}")
 
             chunk_records = []
 
@@ -224,7 +241,8 @@ def main():
                     flip_negate=args.flip_negate,
                     loop=not args.mutate_until_accepted,
                     iterator=iterator,
-                    run_dir=run_dir
+                    run_dir=run_dir,
+                    mutators=args.mutators,
                 )
 
                 if not isinstance(rec_list, list):

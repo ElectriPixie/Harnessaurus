@@ -129,7 +129,7 @@ class PluginManager:
         self.plugins = plugins
         self.channel_map = channel_map or {}
 
-    def process_prompt(self, prompt: str, plugins_to_apply: Optional[List[PluginBase]] = None) -> str:
+    def process_prompt(self, prompt: str, mutation_index: int = 0, plugins_to_apply: Optional[list] = None ) -> str:
         """
         Apply prompt mutators.
 
@@ -138,19 +138,36 @@ class PluginManager:
             plugins_to_apply: 
                 - None: use self.plugins
                 - empty list: apply no plugins
-                - non-empty list: apply only these plugins
+                - non-empty list of PluginBase instances or class-name strings: apply only these plugins
 
         Returns:
             str: Mutated prompt
         """
+        debug_print(f"[DEBUG] Original prompt:\n{prompt}\n")
+        debug_print(f"[DEBUG] plugins_to_apply: {plugins_to_apply}")
+
         if plugins_to_apply is None:
             active_plugins = self.plugins
+            debug_print(f"[DEBUG] Using all loaded plugins: {[p.__class__.__name__ for p in active_plugins]}")
+        elif all(isinstance(p, str) for p in plugins_to_apply):
+            # convert class-name strings to actual plugin instances from self.plugins
+            name_to_plugin = {p.__class__.__name__: p for p in self.plugins}
+            active_plugins = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
+            missing = [name for name in plugins_to_apply if name not in name_to_plugin]
+            debug_print(f"[DEBUG] Requested plugin names: {plugins_to_apply}")
+            debug_print(f"[DEBUG] Resolved plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
+            if missing:
+                print(f"[WARNING] These plugin names were not found: {missing}")
         else:
-            active_plugins = plugins_to_apply  # could be empty list, which is valid
+            active_plugins = plugins_to_apply  # assume already PluginBase instances
+            debug_print(f"[DEBUG] Using provided plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
 
         for plugin in active_plugins:
-            prompt = plugin.process_prompt(prompt)
+            debug_print(f"[DEBUG] Applying plugin: {plugin.__class__.__name__}")
+            prompt = plugin.process_prompt(prompt, mutation_index)
+            debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}:\n{prompt}\n")
 
+        debug_print(f"[DEBUG] Final mutated prompt:\n{prompt}")
         return prompt
 
     def process_output(self, prompt: str, output: str, plugin_name: str) -> Optional[object]:
@@ -203,6 +220,7 @@ def run_prompt_test(
     max_iterations: int = 10,
     loop: bool = True,                # if True: run max_mutations times, else once or until accepted
     max_mutations: int = 1,
+    mutators: list = None,
     iterator: int = 1,
     include_mutated_output: bool = True,  # toggle mutation runs on/off
     flip_negate: bool = False,
@@ -257,8 +275,19 @@ def run_prompt_test(
             plugin_name = type(plugin).__name__
             analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
 
+    rational_mutator = ["RationalizationMutator"]
+    if (len(rational_mutator)):
+        name_to_plugin = {p.__class__.__name__: p for p in pm.plugins}
+        plugin_name = "RationalizationMutator"
+        RationalizationMutator = name_to_plugin.get(plugin_name)
+        iterations=RationalizationMutator.mutations
+        loop=True
+
     for mutation_count in range(1, iterations + 1):
-        mutated_prompt = pm.process_prompt(clean_prompt)
+        if not mutators:
+            mutated_prompt = pm.process_prompt(clean_prompt)
+        else:
+            mutated_prompt = pm.process_prompt(clean_prompt, plugins_to_apply=mutators, mutation_index=mutation_count)
 
         if iterator == 1:
             mutated_output = model.infer_single_pass(

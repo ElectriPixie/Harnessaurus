@@ -2,7 +2,7 @@
 from typing import Dict, Any
 
 class PluginBase:
-    def process_prompt(self, prompt: str) -> str:
+    def process_prompt(self, prompt: str, mutation_index: int = 0) -> str:
         return prompt
 
     def process_output(self, prompt: str, output: str) -> Dict[str, Any]:
