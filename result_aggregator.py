@@ -2,186 +2,103 @@ import csv
 import json
 import os
 from collections import defaultdict
+from typing import List, Dict, Any
+from data_structures import Record
 
 class ResultAggregator:
-    def __init__(self):
-        self.total_prompts = 0
-        self.plugin_flags = defaultdict(int)
-        self.plugin_suspicious = defaultdict(int)  # {(plugin, suspicious_flag): count}
-        self.plugin_numeric_metrics = defaultdict(lambda: defaultdict(list))  # {plugin: {metric: [values]}}
-        self.records = []
+    def __init__(self, debug: bool = False):
+        self.debug = debug
+        self.total_prompts: int = 0
+        self.plugin_flags: defaultdict[str, int] = defaultdict(int)
+        self.plugin_suspicious: defaultdict[tuple[str, str], int] = defaultdict(int)
+        self.plugin_numeric_metrics: defaultdict[str, defaultdict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        self.records: List[Record] = []
 
-    def add_record(self, record: dict):
+    def _dprint(self, *args):
+        if self.debug:
+            print("[ResultAggregator]", *args)
+
+    def add_record(self, record: Record):
+        """Process a Record object and update aggregator stats."""
         self.records.append(record)
         self.total_prompts += 1
-        for key in ['analysis_clean', 'analysis_mutated']:
-            analysis = record.get(key)
-            if not analysis:
-                continue  # skip if missing
 
+        for output_attr in ['clean_output', 'mutated_output']:
+            output: Record | None = getattr(record, output_attr)
+            if output is None or not hasattr(output, 'analysis') or not isinstance(output.analysis, dict):
+                continue
+
+            analysis: Dict[str, Any] = output.analysis
             for plugin_name, plugin_result in analysis.items():
                 if not isinstance(plugin_result, dict):
-                    continue  # skip malformed plugin result
+                    continue
 
-                # Count flagged occurrences safely
+                # Count flagged occurrences
                 if plugin_result.get('flagged'):
                     self.plugin_flags[plugin_name] += 1
 
-                # Count suspicious boolean flags safely
-                for suspicious_key in [
-                    'hidden_motivation_suspected',
-                    'evaluation_awareness_detected',
-                    'sandbagging_suspected',
-                    'reward_hacking_suspected',
-                    'sabotage_suspected'
-                ]:
-                    if plugin_result.get(suspicious_key):
-                        self.plugin_suspicious[(plugin_name, suspicious_key)] += 1
+                # Count suspicious boolean flags
+                for flag, val in plugin_result.items():
+                    if isinstance(val, bool) and (flag.endswith('_suspected') or flag.endswith('_detected')) and val:
+                        self.plugin_suspicious[(plugin_name, flag)] += 1
 
-                # Collect numeric metrics if present and valid
-                for metric in [
-                    'score', 'lexical_diversity', 'average_word_length',
-                    'length_change_from_last', 'semantic_similarity_to_last',
-                    'hedging_phrases_found', 'vague_phrases_found', 'evasive_phrases_found',
-                    'hedging_count', 'reasons_count'
-                ]:
-                    val = plugin_result.get(metric)
+                # Collect numeric metrics
+                for metric, val in plugin_result.items():
                     if isinstance(val, (int, float)):
                         self.plugin_numeric_metrics[plugin_name][metric].append(val)
 
-    def generate_summary(self, run_dir: str = None):
-        total = self.total_prompts or 1
+    def generate_summary(self) -> Dict[str, Any]:
+        total = max(self.total_prompts, 1)
 
-        avg_metrics = {}
-        for plugin, metrics in self.plugin_numeric_metrics.items():
-            avg_metrics[plugin] = {}
-            for metric, values in metrics.items():
-                if values:
-                    avg_metrics[plugin][metric] = sum(values) / len(values)
-                else:
-                    avg_metrics[plugin][metric] = None
-
-        suspicious_counts = {
-            f"{plugin}_{key}": count
-            for (plugin, key), count in self.plugin_suspicious.items()
+        avg_metrics = {
+            plugin: {metric: (sum(vals) / len(vals) if vals else None)
+                     for metric, vals in metrics.items()}
+            for plugin, metrics in self.plugin_numeric_metrics.items()
         }
+
+        suspicious_counts = {f"{plugin}_{flag}": count for (plugin, flag), count in self.plugin_suspicious.items()}
 
         summary = {
             'total_prompts_tested': self.total_prompts,
             'plugin_flag_counts': dict(self.plugin_flags),
+            'plugin_flag_percentages': {k: v / total * 100 for k, v in self.plugin_flags.items()},
             'plugin_suspicious_counts': suspicious_counts,
-            'plugin_flag_percentages': {k: (v / total * 100) for k, v in self.plugin_flags.items()},
-            'plugin_suspicious_percentages': {k: (v / total * 100) for k, v in suspicious_counts.items()},
-            'plugin_average_metrics': avg_metrics,
+            'plugin_suspicious_percentages': {k: v / total * 100 for k, v in suspicious_counts.items()},
+            'plugin_average_metrics': avg_metrics
         }
-
-        # If run_dir is provided, save summary.json there
-        if run_dir:
-            try:
-                os.makedirs(run_dir, exist_ok=True)
-                summary_path = os.path.join(run_dir, "summary.json")
-                with open(summary_path, 'w', encoding='utf-8') as f:
-                    json.dump(summary, f, indent=2, ensure_ascii=False)
-                print(f"[ResultAggregator] Saved summary.json: {summary_path}")
-            except Exception as e:
-                print(f"[ResultAggregator] Failed to save summary.json: {e}")
 
         return summary
 
-    def save_csv(self, filepath: str):
-        try:
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            keys = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output']
-            plugin_keys = set()
-            numeric_metrics = set()
-
-            for record in self.records:
-                for key in ['analysis_clean', 'analysis_mutated']:
-                    analysis = record.get(key)
-                    if not analysis:
-                        continue
-                    plugin_keys.update(analysis.keys())
-                    for plugin_result in analysis.values():
-                        if not isinstance(plugin_result, dict):
-                            continue
-                        numeric_metrics.update(
-                            metric for metric, val in plugin_result.items()
-                            if isinstance(val, (int, float))
-                        )
-
-            plugin_keys = sorted(plugin_keys)
-            numeric_metrics = sorted(numeric_metrics)
-
-            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile)
-                header = keys.copy()
-                header += [f"{p}_clean_flagged" for p in plugin_keys]
-
-                include_mutated_columns = any(
-                    r.get('mutated_output') for r in self.records
-                )
-
-                if include_mutated_columns:
-                    header += [f"{p}_mutated_flagged" for p in plugin_keys]
-
-                for p in plugin_keys:
-                    for metric in numeric_metrics:
-                        header.append(f"{p}_clean_{metric}")
-                if include_mutated_columns:
-                    for p in plugin_keys:
-                        for metric in numeric_metrics:
-                            header.append(f"{p}_mutated_{metric}")
-
-                writer.writerow(header)
-
-                for r in self.records:
-                    row = [r.get(k, '') for k in keys]
-
-                    # clean flagged
-                    for p in plugin_keys:
-                        row.append(str(r.get('analysis_clean', {}).get(p, {}).get('flagged', False)))
-
-                    # mutated flagged or blanks
-                    if include_mutated_columns:
-                        if r.get('mutated_output'):
-                            for p in plugin_keys:
-                                row.append(str(r.get('analysis_mutated', {}).get(p, {}).get('flagged', False)))
-                        else:
-                            row.extend([''] * len(plugin_keys))
-
-                    # clean metrics
-                    for p in plugin_keys:
-                        for metric in numeric_metrics:
-                            val = r.get('analysis_clean', {}).get(p, {}).get(metric, '')
-                            if isinstance(val, float):
-                                val = f"{val:.4f}"
-                            row.append(val)
-
-                    # mutated metrics or blanks
-                    if include_mutated_columns:
-                        if r.get('mutated_output'):
-                            for p in plugin_keys:
-                                for metric in numeric_metrics:
-                                    val = r.get('analysis_mutated', {}).get(p, {}).get(metric, '')
-                                    if isinstance(val, float):
-                                        val = f"{val:.4f}"
-                                    row.append(val)
-                        else:
-                            row.extend([''] * (len(plugin_keys) * len(numeric_metrics)))
-
-                    writer.writerow(row)
-            print(f"[ResultAggregator] Successfully saved CSV: {filepath}")
-        except Exception as e:
-            print(f"[ResultAggregator] Error saving CSV: {e}")
-
     def save_json(self, filepath: str):
+        """Save all records and summary to JSON, flush before return."""
         try:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump({
                     'summary': self.generate_summary(),
-                    'records': self.records,
-                }, f, indent=2)
-            print(f"[ResultAggregator] Successfully saved JSON: {filepath}")
+                    'records': [r.to_dict() for r in self.records]
+                }, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            self._dprint(f"Saved JSON: {filepath}")
         except Exception as e:
-            print(f"[ResultAggregator] Error saving JSON: {e}")
+            print(f"[ResultAggregator] Failed to save JSON: {e}")
+
+    def save_csv(self, filepath: str):
+        """Save all records to CSV, flush before return."""
+        if not self.records:
+            return
+
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        fieldnames = list(self.records[0].to_dict().keys())
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for rec in self.records:
+                    writer.writerow(rec.to_dict())
+                f.flush()
+                os.fsync(f.fileno())
+            self._dprint(f"Saved CSV: {filepath}")
+        except Exception as e:
+            print(f"[ResultAggregator] Failed to save CSV: {e}")

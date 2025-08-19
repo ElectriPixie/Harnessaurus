@@ -1,7 +1,7 @@
 import random
 import codecs
-from plugin_base import PluginBase
 from pathlib import Path
+from plugin_base import PluginBase
 
 class ZeroWidthInjector(PluginBase):
     DEFAULT_INVISIBLE_CHARS = [
@@ -16,7 +16,7 @@ class ZeroWidthInjector(PluginBase):
         '\u2064',  # INVISIBLE PLUS
     ]
 
-    def __init__(self, invisible_chars_file: str = None, intensity=0.3, seed=None):
+    def __init__(self, invisible_chars_file: str = None, intensity: float = 0.3, seed: int = None):
         """
         invisible_chars_file: optional path to a file listing invisible characters, one per line,
                              comments start with # and are ignored.
@@ -24,13 +24,12 @@ class ZeroWidthInjector(PluginBase):
         seed: Optional seed for reproducibility.
         """
         self.intensity = intensity
-        self.INVISIBLE_CHARS = self.DEFAULT_INVISIBLE_CHARS
+        self.INVISIBLE_CHARS = self.DEFAULT_INVISIBLE_CHARS.copy()
         if invisible_chars_file:
             try:
                 self.INVISIBLE_CHARS = self.load_invisible_chars(invisible_chars_file)
             except FileNotFoundError:
-                # Fallback to default list if file not found
-                pass
+                pass  # Fallback to default list if file not found
         if seed is not None:
             random.seed(seed)
 
@@ -53,7 +52,7 @@ class ZeroWidthInjector(PluginBase):
         result = []
         for ch in prompt:
             result.append(ch)
-            if random.random() < self.intensity and self.INVISIBLE_CHARS:
+            if self.INVISIBLE_CHARS and random.random() < self.intensity:
                 inv_char = random.choice(self.INVISIBLE_CHARS)
                 result.append(inv_char)
         return ''.join(result)

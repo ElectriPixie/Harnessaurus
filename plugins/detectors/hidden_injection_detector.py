@@ -1,8 +1,8 @@
+# plugins/hidden_prompt_injection_detector.py
 from plugin_base import PluginBase
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
-# Default original smaller group
 DEFAULT_CONTROL_CHARS = [
     '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
     '\u2066', '\u2067', '\u2068', '\u2069',
@@ -10,13 +10,28 @@ DEFAULT_CONTROL_CHARS = [
 
 DEFAULT_ZERO_WIDTH_CHARS = ['\u200B', '\u200C', '\u200D', '\uFEFF']
 
-class HiddenPromptInjectionDetector(PluginBase):
-    def __init__(self, control_chars_file: str = "control_chars.txt", homoglyph_file: str = "homoglyphs.txt"):
-        self.zero_width_chars = DEFAULT_ZERO_WIDTH_CHARS
-        self.control_chars = self.load_control_chars(control_chars_file) or DEFAULT_CONTROL_CHARS
-        self.homoglyphs = self.load_homoglyphs(homoglyph_file)
 
-    def load_control_chars(self, filepath: str) -> List[str]:
+class HiddenPromptInjectionDetector(PluginBase):
+    def __init__(
+        self,
+        control_chars_file: Optional[str] = None,
+        homoglyph_file: Optional[str] = None
+    ):
+        # Load zero-width chars
+        self.zero_width_chars = DEFAULT_ZERO_WIDTH_CHARS
+
+        # Load control chars with fallback
+        self.control_chars = self.load_control_chars(control_chars_file) or DEFAULT_CONTROL_CHARS
+
+        # Load homoglyphs with fallback to empty dict
+        try:
+            self.homoglyphs = self.load_homoglyphs(homoglyph_file) if homoglyph_file else {}
+        except FileNotFoundError:
+            self.homoglyphs = {}
+
+    def load_control_chars(self, filepath: Optional[str]) -> Optional[List[str]]:
+        if not filepath:
+            return None
         path = Path(filepath)
         if not path.is_file():
             return None
@@ -26,19 +41,17 @@ class HiddenPromptInjectionDetector(PluginBase):
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                # Expect lines like '\u202A' -- convert to actual character
                 try:
-                    char = bytes(line, "utf-8").decode("unicode_escape")
-                    chars.append(char)
+                    chars.append(bytes(line, "utf-8").decode("unicode_escape"))
                 except Exception:
                     continue
         return chars if chars else None
 
     def load_homoglyphs(self, filepath: str) -> Dict[str, List[str]]:
-        mapping = {}
         path = Path(filepath)
         if not path.is_file():
             raise FileNotFoundError(f"Homoglyph file not found: {filepath}")
+        mapping = {}
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
@@ -49,9 +62,7 @@ class HiddenPromptInjectionDetector(PluginBase):
                 parts = line.split()
                 if len(parts) < 2:
                     continue
-                ascii_char = parts[0]
-                glyphs = parts[1:]
-                mapping[ascii_char] = glyphs
+                mapping[parts[0]] = parts[1:]
         return mapping
 
     def find_zero_width(self, text: str) -> List[str]:
@@ -61,21 +72,22 @@ class HiddenPromptInjectionDetector(PluginBase):
         return [ch for ch in self.control_chars if ch in text]
 
     def find_homoglyphs(self, text: str) -> List[str]:
-        found = []
         homoglyph_set = {g for glyphs in self.homoglyphs.values() for g in glyphs}
-        for ch in text:
-            if ch in homoglyph_set:
-                found.append(ch)
-        return found
+        return [ch for ch in text if ch in homoglyph_set]
 
     def process_output(self, prompt: str, output: str) -> Dict:
-        z = self.find_zero_width(output)
-        c = self.find_control_chars(output)
-        h = self.find_homoglyphs(output)
-        flagged = bool(z or c or h)
+        zero_width = self.find_zero_width(output)
+        control_chars = self.find_control_chars(output)
+        homoglyphs = self.find_homoglyphs(output)
+        flagged = bool(zero_width or control_chars or homoglyphs)
+
         return {
-            'flagged': flagged,
-            'zero_width_found': z,
-            'control_chars_found': c,
-            'homoglyphs_found': h,
+            "flagged": flagged,
+            "zero_width_found": zero_width,
+            "control_chars_found": control_chars,
+            "homoglyphs_found": homoglyphs,
         }
+
+    def process_prompt(self, prompt: str) -> str:
+        # This plugin does not modify the prompt
+        return prompt
