@@ -124,51 +124,62 @@ class GPTModel:
 
         return generated_text
 
-    def infer_with_prompt_list(
+    def infer_iterative_with_prompt_list(
         self,
         prompts: List[str],
         max_chunk_tokens: int = 256,
+        max_iterations: int = 10,
         flip_negate: bool = False,
     ) -> str:
         """
-        Iteratively feed a list of prompts to the model, chaining context from previous outputs.
+        For each prompt in the list, iteratively feed it to the model like infer_iterative,
+        then accumulate all outputs, maintaining sliding context.
 
         Args:
             prompts: Ordered list of prompts to feed
             max_chunk_tokens: Max tokens per server call
+            max_iterations: Max iterations per prompt
             flip_negate: Whether to flip negations from previous output
 
         Returns:
             str: Combined output from all prompts
         """
-        accumulated_output = ""
-        context = ""  # full accumulated context to feed back
+        combined_output = ""
+        accumulated_context = ""  # context across all prompts
+        generated_text_set = []
 
         for idx, prompt in enumerate(prompts, 1):
-            # Include full accumulated context from all previous prompts
-            current_prompt = prompt
-            if context:
-                current_prompt += "\n\nPrevious context:\n" + (flip_negation(context) if flip_negate else context)
+            generated_text = ""
 
-            data = self._call_server(current_prompt, max_chunk_tokens)
-            chunk = data["choices"][0]["message"]["content"]
-            finish_reason = data["choices"][0].get("finish_reason", "")
+            for i in range(max_iterations):
+                # Use sliding window context for this prompt
+                recent_context = generated_text[-max(0, self.max_context_chars - len(prompt)):]
+                context_to_use = accumulated_context + "\n\n" + recent_context if accumulated_context else recent_context
 
-            accumulated_output += chunk
-            context += "\n\n" + chunk  # append to context for next iteration
+                current_prompt = prompt + (flip_negation(context_to_use) if flip_negate else context_to_use)
 
-            # Optional: stop if model finishes naturally before iterating all prompts
-            if finish_reason != "length":
-                break
+                data = self._call_server(current_prompt, max_chunk_tokens)
+                chunk = data["choices"][0]["message"]["content"]
+                finish_reason = data["choices"][0].get("finish_reason", "")
 
-        return accumulated_output
+                generated_text += chunk
+
+                if finish_reason != "length":
+                    break
+
+            # Append the fully generated text for this prompt to the combined output
+            combined_output += generated_text + "\n\n"
+            accumulated_context += "\n\n" + generated_text  # update context for next prompt
+            generated_text_set.append(generated_text)
+
+        return generated_text_set
 
 class PluginManager:
     def __init__(self, plugins: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
         self.plugins = plugins
         self.channel_map = channel_map or {}
 
-    def process_prompt(self, prompt: str, mutation_index: int = 0, plugins_to_apply: Optional[list] = None ) -> str:
+    def process_prompt(self, prompt: str, mutation_index: int = 0, plugins_to_apply: Optional[list] = None, ret_list: bool = False, with_context: bool = False, last_plugin_name: str = None ) -> str:
         """
         Apply prompt mutators.
 
@@ -201,10 +212,17 @@ class PluginManager:
             active_plugins = plugins_to_apply  # assume already PluginBase instances
             debug_print(f"[DEBUG] Using provided plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
 
+        last_plugin = None
         for plugin in active_plugins:
+            if plugin.__class__.__name__ == last_plugin_name:
+                last_plugin = plugin
+                continue
             debug_print(f"[DEBUG] Applying plugin: {plugin.__class__.__name__}")
-            prompt = plugin.process_prompt(prompt, mutation_index)
+            prompt = plugin.process_prompt(prompt=prompt, mutation_index=mutation_index, ret_list=ret_list, with_context=with_context)
             debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}:\n{prompt}\n")
+
+        if last_plugin:
+            prompt = last_plugin.process_prompt(prompt=prompt, mutation_index=mutation_index, ret_list=ret_list, with_context=with_context) 
 
         debug_print(f"[DEBUG] Final mutated prompt:\n{prompt}")
         return prompt
@@ -249,6 +267,75 @@ class PluginManager:
     def plugins_by_name(self) -> Dict[str, PluginBase]:
         return {plugin.__class__.__name__: plugin for plugin in self.plugins}
 
+def run_model_inference(model, prompt, iterator=1, max_chunk_tokens=256, max_iterations=5, flip_negate=False):
+    """
+    Dispatch mutated_prompt to the correct model method based on iterator.
+
+    Args:
+        model: the model object containing the inference methods
+        mutated_prompt: str or list of prompts
+        iterator: chooses the method (1-4)
+        max_tokens_per_chunk: max tokens for chunked methods
+        max_iterations: max iterations for iterative methods
+        flip_negate: whether to apply flip_negate in iterative methods
+
+    Returns:
+        The model output
+    """
+    if iterator == 1:
+        return model.infer_single_pass(prompt=prompt)
+    elif iterator == 2:
+        return model.infer_iterative(
+            prompt=prompt,
+            max_chunk_tokens=max_chunk_tokens,
+            max_iterations=max_iterations,
+            flip_negate=flip_negate
+        )
+    elif iterator == 3:
+        return model.infer_iterative_exploit(
+            prompt=prompt,
+            max_chunk_tokens=max_chunk_tokens,
+            max_iterations=max_iterations,
+            flip_negate=flip_negate
+        )
+    elif iterator == 4:
+        return model.infer_iterative_with_prompt_list(
+            prompts=prompt,
+            max_chunk_tokens=max_chunk_tokens,
+            max_iterations=max_iterations,
+            flip_negate=flip_negate
+        )
+    else:
+        raise ValueError(f"Unsupported iterator value: {iterator}")
+    
+def create_record(
+    original_prompt,
+    mutated_prompt,
+    clean_output,
+    mutated_output,
+    analysis_clean,
+    analysis_mutated,
+    mutation_iteration,
+    run_dir
+):
+    """
+    Creates a record dictionary for a single mutation.
+
+    Returns:
+        dict
+    """
+    return {
+        'original_prompt': original_prompt,
+        'mutated_prompt': mutated_prompt,
+        'clean_output': clean_output,
+        'mutated_output': mutated_output,
+        'analysis_clean': analysis_clean,
+        'analysis_mutated': analysis_mutated,
+        #'output_diff': diff,  # uncomment if needed
+        'mutation_iteration': mutation_iteration,
+        'run_dir': run_dir,
+    }
+
 def run_prompt_test(
     prompt: str,
     model: GPTModel,
@@ -265,6 +352,8 @@ def run_prompt_test(
     flip_negate: bool = False,
     rerun_clean_promt: bool = False,
     run_dir: str = None,
+    last_mutator_name: str = None,
+    prompt_sets: bool = False
 ) -> List[dict]:
     pm = PluginManager(plugins, channel_map=channel_map)
 
@@ -272,18 +361,14 @@ def run_prompt_test(
     clean_prompt = prompt
 
     # Run clean output always
-    if iterator == 1:
-        clean_output = model.infer_single_pass(
-            clean_prompt
-        )
-    elif iterator == 2:
-        clean_output = model.infer_iterative(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
-        )
-    elif iterator == 3:
-        clean_output = model.infer_iterative_exploit(
-            clean_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
-        )
+    clean_output = run_model_inference(
+        model=model,
+        prompt=clean_prompt,
+        iterator=iterator,
+        max_chunk_tokens=max_tokens_per_chunk, 
+        max_iterations=max_iterations, 
+        flip_negate=flip_negate
+    )
 
     if not include_mutated_output:
         # Only analyze clean output, no mutation runs
@@ -320,53 +405,87 @@ def run_prompt_test(
         plugin_name = "RationalizationMutator"
         RationalizationMutator = name_to_plugin.get(plugin_name)
         iterations=RationalizationMutator.mutations
+        iterator = 4
         loop=True
+        ret_list = False
+        with_context = True
 
     for mutation_count in range(1, iterations + 1):
         if not mutators:
             mutated_prompt = pm.process_prompt(clean_prompt)
         else:
-            mutated_prompt = pm.process_prompt(clean_prompt, plugins_to_apply=mutators, mutation_index=mutation_count)
+            if with_context:
+                mutated_prompt_set = []
+                mutated_output_set = []
+                if not ret_list:
+                    mutated_prompt_set = pm.process_prompt(clean_prompt, plugins_to_apply=mutators, mutation_index=mutation_count, ret_list=ret_list, with_context=with_context, last_plugin_name=last_mutator_name)
+            else:
+                mutated_prompt = pm.process_prompt(clean_prompt, plugins_to_apply=mutators, mutation_index=mutation_count)
 
-        if iterator == 1:
-            mutated_output = model.infer_single_pass(
-                mutated_prompt
-            )
-        elif iterator == 2:
-            mutated_output = model.infer_iterative(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
-            )
-        elif iterator == 3:
-            mutated_output = model.infer_iterative_exploit(
-                mutated_prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate
+        if with_context:
+                mutated_output_set = run_model_inference(
+                    model=model,
+                    prompt=mutated_prompt_set,
+                    iterator=iterator,
+                    max_chunk_tokens=max_tokens_per_chunk, 
+                    max_iterations=max_iterations, 
+                    flip_negate=flip_negate
+                )
+        else:
+            mutated_output = run_model_inference(
+                model=model,
+                prompt=mutated_prompt,
+                iterator=iterator,
+                max_chunk_tokens=max_tokens_per_chunk, 
+                max_iterations=max_iterations, 
+                flip_negate=flip_negate
             )
 
         try:
             analysis_mutated = {}
             if rerun_clean_promt:
                 analysis_clean = {}
+            if with_context:
+                for idx, mutated_output in enumerate(mutated_output_set):
+                    mutated_prompt = mutated_prompt_set[idx]
+                    for plugin in plugins:
+                        plugin_name = type(plugin).__name__
+                        if rerun_clean_promt:
+                            analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+                        analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
+                    record = create_record(
+                        original_prompt=clean_prompt,
+                        mutated_prompt=mutated_prompt,
+                        clean_output=clean_output,
+                        mutated_output=mutated_output,
+                        analysis_clean=analysis_clean,
+                        analysis_mutated=analysis_mutated,
+                        mutation_iteration=mutation_count,
+                        run_dir=run_dir
+                    )
+                    pm.process_log(record)
+                    results.append(record)
+                    aggregator.add_record(record)
+            else:
+                for plugin in plugins:
+                    plugin_name = type(plugin).__name__
+                    if rerun_clean_promt:
+                        analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
+                    analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
 
-            for plugin in plugins:
-                plugin_name = type(plugin).__name__
-                if rerun_clean_promt:
-                    analysis_clean[plugin_name] = pm.process_output(clean_prompt, clean_output, plugin_name)
-                analysis_mutated[plugin_name] = pm.process_output(mutated_prompt, mutated_output, plugin_name)
-
-            record = {
-                'original_prompt': clean_prompt,
-                'mutated_prompt': mutated_prompt,
-                'clean_output': clean_output,
-                'mutated_output': mutated_output,
-                'analysis_clean': analysis_clean,
-                'analysis_mutated': analysis_mutated,
-                #'output_diff': diff,
-                'mutation_iteration': mutation_count,
-                'run_dir': run_dir,
-            }
-
-            pm.process_log(record)
-            results.append(record)
-            aggregator.add_record(record)
+                record = create_record(
+                    original_prompt=clean_prompt,
+                    mutated_prompt=mutated_prompt,
+                    clean_output=clean_output,
+                    mutated_output=mutated_output,
+                    analysis_clean=analysis_clean,
+                    analysis_mutated=analysis_mutated,
+                    mutation_iteration=mutation_count,
+                    run_dir=run_dir
+                )
+                pm.process_log(record)
+                results.append(record)
+                aggregator.add_record(record)
 
             # If loop==False, break early if RefusalDetector accepted
             if not loop:

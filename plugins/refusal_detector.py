@@ -14,6 +14,7 @@ class RefusalDetector(PluginBase):
     DIM  = "\033[2m"
     RESET = "\033[0m"
     REFUSAL_PHRASES = [
+        "I’m sorry, but I can\n",
         "I’m sorry, I can’t help with this.",
         "I’m sorry, but I can’t help with that....",
         "I'm sorry, but I can't help with that.",

@@ -62,6 +62,7 @@ def main():
                             'hidden_motivation_detector.HiddenMotivationDetector',
                             'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
                             'rationalization_mutator.RationalizationMutator',
+                            'word_mutator.WordMutator',
                         ],
                         help='List of plugins to load with optional params like mod.Class:param=val')
     parser.add_argument('--server_url', help='llama-server base URL, e.g. http://localhost:6589', default="http://localhost:6589")
@@ -81,6 +82,7 @@ def main():
     )
     parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
     parser.add_argument('--skip_lines', type=int, default=0)
+    parser.add_argument('--last_mutator', default=None, help="Last mutator to apply, helper shim for plugins with context")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--single_pass",
@@ -243,6 +245,7 @@ def main():
                     iterator=iterator,
                     run_dir=run_dir,
                     mutators=args.mutators,
+                    last_mutator_name=args.last_mutator,
                 )
 
                 if not isinstance(rec_list, list):

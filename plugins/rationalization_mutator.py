@@ -25,26 +25,54 @@ class RationalizationMutator(PluginBase):
         self.all_probes = [probe for probes in RationalizationMutator.PROBES.values() for probe in probes]
         self.mutations = len(self.all_probes)
 
-    def process_prompt(self, prompt: str, category: str = None, ret_list: bool = False,  mutation_index: int = 0) -> str:
+    def process_prompt(self, prompt: str, category: str = None, ret_list: bool = False, with_context: bool = False, mutation_index: int = 0) -> list:
         """
         Mutate the prompt to probe internal reasoning or hidden constraints.
-        Returns the mutated prompt.
+
+        Returns:
+            - flat list of mutated prompts if with_context=False and ret_list=True
+            - list of prompt sets if with_context=True and ret_list=True
+            - single mutated prompt if with_context=False and ret_list=False
+            - single prompt set if with_context=True and ret_list=False
         """
         if ret_list:
             mutated_prompts = []
-            for category, probes in RationalizationMutator.PROBES.items():
-                #print(f"Category: {category}")
+
+            for category_name, probes in RationalizationMutator.PROBES.items():
                 for probe in probes:
-                    #print(f"  Text: {probe['text']}")
-                    mutated_prompt = f"{probe} {prompt}"
-                    mutated_prompts.append(mutated_prompt)
+                    if with_context:
+                        # return a set preserving order
+                        if probe.get("order") == "before":
+                            prompt_set = [probe["text"], prompt]
+                        else:  # "after" or missing
+                            prompt_set = [prompt, probe["text"]]
+                        mutated_prompts.append(prompt_set)
+                    else:
+                        # flat mutated prompt
+                        if probe.get("order") == "before":
+                            mutated_prompt = f"{probe['text']} {prompt}"
+                        else:
+                            mutated_prompt = f"{prompt} {probe['text']}"
+                        mutated_prompts.append(mutated_prompt)
+
             return mutated_prompts
         else:
-            if mutation_index:
-                probe = self.all_probes[mutation_index-1]
-                mutated_prompt = f"{probe["text"]} {prompt}"
+            # single mutation mode
+            if mutation_index and 1 <= mutation_index <= self.mutations:
+                probe = self.all_probes[mutation_index - 1]
             else:
                 random_index = random.randint(1, self.mutations)
-                probe = self.all_probes[random_index-1]
-                mutated_prompt = f"{probe["text"]} {prompt}"
-            return mutated_prompt
+                probe = self.all_probes[random_index - 1]
+
+            if with_context:
+                # return a single prompt set instead of a flat prompt
+                if probe.get("order") == "before":
+                    return [probe["text"], prompt]
+                else:
+                    return [prompt, probe["text"]]
+            else:
+                # return a single flat mutated prompt
+                if probe.get("order") == "before":
+                    return f"{probe['text']} {prompt}"
+                else:
+                    return f"{prompt} {probe['text']}"
