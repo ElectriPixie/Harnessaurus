@@ -124,6 +124,45 @@ class GPTModel:
 
         return generated_text
 
+    def infer_with_prompt_list(
+        self,
+        prompts: List[str],
+        max_chunk_tokens: int = 256,
+        flip_negate: bool = False,
+    ) -> str:
+        """
+        Iteratively feed a list of prompts to the model, chaining context from previous outputs.
+
+        Args:
+            prompts: Ordered list of prompts to feed
+            max_chunk_tokens: Max tokens per server call
+            flip_negate: Whether to flip negations from previous output
+
+        Returns:
+            str: Combined output from all prompts
+        """
+        accumulated_output = ""
+        context = ""  # full accumulated context to feed back
+
+        for idx, prompt in enumerate(prompts, 1):
+            # Include full accumulated context from all previous prompts
+            current_prompt = prompt
+            if context:
+                current_prompt += "\n\nPrevious context:\n" + (flip_negation(context) if flip_negate else context)
+
+            data = self._call_server(current_prompt, max_chunk_tokens)
+            chunk = data["choices"][0]["message"]["content"]
+            finish_reason = data["choices"][0].get("finish_reason", "")
+
+            accumulated_output += chunk
+            context += "\n\n" + chunk  # append to context for next iteration
+
+            # Optional: stop if model finishes naturally before iterating all prompts
+            if finish_reason != "length":
+                break
+
+        return accumulated_output
+
 class PluginManager:
     def __init__(self, plugins: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
         self.plugins = plugins
