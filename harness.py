@@ -8,7 +8,7 @@ from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
 from data_structures import Prompt, RunPrompt, Output, Record
 from result_aggregator import ResultAggregator
 
-DEBUG = False
+DEBUG = True
 
 def debug_print(*args, **kwargs):
     if DEBUG:
@@ -113,17 +113,57 @@ class PluginManager:
         self.loggers = loggers
         self.channel_map = channel_map or {}
 
-    def process_prompt(self, prompt: Prompt, plugins_to_apply: Optional[list] = None) -> Prompt:
+    def process_prompt(
+        self,
+        prompt: Prompt,
+        plugins_to_apply: Optional[list] = None,
+    ) -> Prompt:
+        """
+        Apply prompt mutators.
+
+        Args:
+            prompt: The Prompt object to mutate
+            plugins_to_apply:
+                - None: apply no mutators
+                - []: run all mutators
+                - list[str]: resolve by class-name string
+                - list[MutatorPlugin]: use provided instances
+        """
+        debug_print(f"[DEBUG] Original prompt: {prompt.prompt_list}")
+        debug_print(f"[DEBUG] plugins_to_apply: {plugins_to_apply}")
+
+        # Resolve active plugins
         if plugins_to_apply is None:
+            # None means "disable mutators"
+            active_plugins = []
+            debug_print("[DEBUG] No mutators applied (plugins_to_apply=None)")
+        elif plugins_to_apply == []:
+            # Empty list means "run all"
             active_plugins = self.mutators
+            debug_print(f"[DEBUG] Using all loaded plugins: {[p.__class__.__name__ for p in active_plugins]}")
         elif all(isinstance(p, str) for p in plugins_to_apply):
             name_to_plugin = {p.__class__.__name__: p for p in self.mutators}
             active_plugins = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
+            missing = [name for name in plugins_to_apply if name not in name_to_plugin]
+            debug_print(f"[DEBUG] Requested plugin names: {plugins_to_apply}")
+            debug_print(f"[DEBUG] Resolved plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
+            if missing:
+                print(f"[WARNING] These plugin names were not found: {missing}")
         else:
             active_plugins = plugins_to_apply
-        for mutator in active_plugins:
-            prompt = mutator.process_prompt(prompt)
+            debug_print(f"[DEBUG] Using provided plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
+
+        # Apply each mutator in order
+        for plugin in active_plugins:
+            debug_print(f"[DEBUG] Applying plugin: {plugin.__class__.__name__}")
+            prompt = plugin.process_prompt(
+                prompt_obj=prompt,
+            )
+            debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}: {prompt.prompt_list}")
+
+        debug_print(f"[DEBUG] Final mutated prompt: {prompt.prompt_list}")
         return prompt
+
 
     def process_output(
         self,
@@ -132,51 +172,62 @@ class PluginManager:
         plugins_to_apply: Optional[list] = None
     ) -> Output:
         """
-        Run one or more detector plugins on the output.
-        
+        Run one or more detector plugins on the output with debug logging.
+
         Args:
             prompt: The Prompt object that produced the output.
             output: The Output object to analyze.
             plugins_to_apply: Optional list of detectors to run.
-                - If None, runs all detectors.
+                - If None, runs no detectors.
+                - If empty list, runs all detectors.
                 - If list of str, selects by detector class name.
                 - If list of plugin objects, uses them directly.
         """
+        # Ensure output channels exist
         if not output.channels:
             output.channels = split_into_channels(output)
+            print(f"[DEBUG] Created output channels: {list(output.channels.keys())}")
 
-        # Resolve which detectors to run
+        # Determine which detectors to run
         if plugins_to_apply is None:
-            active_detectors = self.detectors
+            active_detectors = []  # run nothing
+            print("[DEBUG] plugins_to_apply=None -> running no detectors")
+        elif isinstance(plugins_to_apply, list) and len(plugins_to_apply) == 0:
+            active_detectors = self.detectors  # run all
+            print(f"[DEBUG] plugins_to_apply=[] -> running all detectors: {[d.__class__.__name__ for d in active_detectors]}")
         elif all(isinstance(p, str) for p in plugins_to_apply):
             name_to_plugin = {p.__class__.__name__: p for p in self.detectors}
             active_detectors = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
+            print(f"[DEBUG] plugins_to_apply by name -> running: {[d.__class__.__name__ for d in active_detectors]}")
         else:
             active_detectors = plugins_to_apply
+            print(f"[DEBUG] plugins_to_apply as objects -> running: {[d.__class__.__name__ for d in active_detectors]}")
 
-        # Ensure main output.analysis exists
+        # Ensure analysis dict exists
         if output.analysis is None:
             output.analysis = {}
 
-        # Run each detector
+        # Run each detector exactly once
         for detector in active_detectors:
             detector_name = detector.__class__.__name__
-
             channels_for_detector = self.channel_map.get(detector_name)
+
             if channels_for_detector:
                 detector_input_text = "\n".join(
                     output.channels.get(ch, "") for ch in channels_for_detector
                 )
+                print(f"[DEBUG] Running {detector_name} on channels: {channels_for_detector}")
             else:
                 detector_input_text = output.raw_output
+                print(f"[DEBUG] Running {detector_name} on raw_output")
 
             detector_input_obj = Output(prompt=prompt, raw_output=detector_input_text)
 
-            # Run detector (returns Output with analysis)
+            # Run detector
             analysis_result_obj = detector.process_output(prompt, detector_input_obj)
-
-            # Save the detector's analysis dict under its name
             output.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
+
+            print(f"[DEBUG] {detector_name} analysis result: {output.analysis[detector_name]}")
 
         return output
 
@@ -212,6 +263,7 @@ def _process_outputs(
     os.makedirs(run_prompt.run_dir, exist_ok=True)
 
     # --- Run clean output first ---
+    print("get clean output")
     clean_output = run_model_inference(
         model,
         prompt_obj,
@@ -221,56 +273,76 @@ def _process_outputs(
         run_prompt.flip_negate
     )
 
-    # Always run all detectors on clean output
-    clean_output = pm.process_output(prompt_obj, clean_output)
+    # Run all detectors on clean output
+    print("run detectors")
+    clean_output = pm.process_output(
+        prompt=prompt_obj,
+        output=clean_output,
+        plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+    )
 
-    max_mutations = getattr(run_prompt, "max_mutations", 1)
-
-    for mutation_index in range(max_mutations + 1):
-        # Apply mutators to prompt (respect run_prompt.mutators)
-        mutated_prompt = pm.process_prompt(
-            prompt_obj,
-            plugins_to_apply=getattr(run_prompt, "use_mutators", None)
-        )
-
-        # Run mutated prompt through model
-        mutated_output = run_model_inference(
-            model,
-            mutated_prompt,
-            iterator,
-            run_prompt.max_tokens_per_chunk,
-            run_prompt.max_iterations,
-            run_prompt.flip_negate
-        )
-
-        # Apply only selected detectors (if provided)
-        mutated_output = pm.process_output(
-            mutated_prompt,
-            mutated_output,
-            plugins_to_apply=getattr(run_prompt, "detector_plugins", None)
-        )
-
-        # Store record
+    # If mutated runs are disabled, return now
+    if not run_prompt.use_mutated:
+        # Store clean record
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
-            mutated_prompt="\n".join(mutated_prompt.prompt_list) if mutation_index > 0 else None,
+            mutated_prompt=None,
             clean_output=clean_output,
-            mutated_output=mutated_output if mutation_index > 0 else None,
-            mutation_iteration=mutation_index,
+            mutated_output=None,
+            mutation_iteration=0,
             run_dir=run_prompt.run_dir
         )
-
         aggregator.add_record(record)
         pm.process_log(record)
         results.append(record)
+        return results
+    else:
+        print("start mutating")
+        max_mutations = getattr(run_prompt, "max_mutations", 1)
 
-        # Only stop early if loop=False and RefusalDetector accepted
-        if not getattr(run_prompt, "loop", True):
-            refusal = mutated_output.analysis.get("RefusalDetector", {})
-            if refusal.get("status") == "accepted":
-                print(f"[INFO] RefusalDetector accepted at mutation {mutation_index}, stopping early")
-                break
+        for mutation_index in range(1, max_mutations + 1):
+            # Apply all mutators sequentially
+            mutated_prompt = pm.process_prompt(
+                prompt=prompt_obj,
+                plugins_to_apply=getattr(run_prompt, "use_mutators", [])
+            )
 
+            # Run mutated prompt through model
+            mutated_infer_output = run_model_inference(
+                model,
+                mutated_prompt,
+                iterator,
+                run_prompt.max_tokens_per_chunk,
+                run_prompt.max_iterations,
+                run_prompt.flip_negate
+            )
+
+            # --- Run detectors only once on the fully mutated output ---
+            mutated_output = pm.process_output(
+                prompt=mutated_prompt, 
+                output=mutated_infer_output,
+                plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+            )
+
+            # Store record
+            record = Record(
+                original_prompt="\n".join(prompt_obj.prompt_list),
+                mutated_prompt="\n".join(mutated_prompt.prompt_list),
+                clean_output=clean_output,
+                mutated_output=mutated_output,
+                mutation_iteration=mutation_index,
+                run_dir=run_prompt.run_dir
+            )
+            aggregator.add_record(record)
+            pm.process_log(record)
+            results.append(record)
+
+            # Stop early if RefusalDetector accepted and loop is False
+            if not getattr(run_prompt, "loop", True):
+                refusal = mutated_output.analysis.get("RefusalDetector", {})
+                if refusal.get("status") == "accepted":
+                    print(f"[INFO] RefusalDetector accepted at mutation {mutation_index}, stopping early")
+                    break
     return results
 
 
