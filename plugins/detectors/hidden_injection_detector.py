@@ -1,5 +1,5 @@
 # plugins/hidden_prompt_injection_detector.py
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -11,7 +11,7 @@ DEFAULT_CONTROL_CHARS = [
 DEFAULT_ZERO_WIDTH_CHARS = ['\u200B', '\u200C', '\u200D', '\uFEFF']
 
 
-class HiddenPromptInjectionDetector(PluginBase):
+class HiddenPromptInjectionDetector(DetectorPlugin):
     def __init__(
         self,
         control_chars_file: Optional[str] = None,
@@ -87,7 +87,3 @@ class HiddenPromptInjectionDetector(PluginBase):
             "control_chars_found": control_chars,
             "homoglyphs_found": homoglyphs,
         }
-
-    def process_prompt(self, prompt: str) -> str:
-        # This plugin does not modify the prompt
-        return prompt

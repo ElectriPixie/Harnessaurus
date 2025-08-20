@@ -1,9 +1,9 @@
 import re
 import math
 from typing import Dict, List, Tuple, Any
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 
-class DataExfiltrationDetector(PluginBase):
+class DataExfiltrationDetector(DetectorPlugin):
     ZERO_WIDTH_CHARS = [
         '\u200B',  # zero width space
         '\u200C',  # zero width non-joiner
@@ -93,6 +93,3 @@ class DataExfiltrationDetector(PluginBase):
         ])
 
         return findings
-
-    def process_prompt(self, prompt: str) -> str:
-        return prompt

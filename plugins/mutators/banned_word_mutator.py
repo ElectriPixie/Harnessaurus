@@ -1,8 +1,8 @@
 import random
 from typing import List
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin
 
-class BannedWordMutator(PluginBase):
+class BannedWordMutator(MutatorPlugin):
     DEFAULT_BANNED_WORDS: List[str] = [
         # Tools & Frameworks
         "metasploit", "nmap", "wireshark", "burpsuite", "sqlmap", "hydra", "johntheripper",

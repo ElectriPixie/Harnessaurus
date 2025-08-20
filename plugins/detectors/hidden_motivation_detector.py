@@ -1,12 +1,12 @@
 # plugins/hidden_motivation_detector.py
 import re
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from sentence_transformers import SentenceTransformer, util
 from typing import Optional
 import torch
 
 
-class HiddenMotivationDetector(PluginBase):
+class HiddenMotivationDetector(DetectorPlugin):
     EVASIVE_PHRASES = [
         r"\bI am not able to\b",
         r"\bI cannot provide\b",
@@ -150,7 +150,3 @@ class HiddenMotivationDetector(PluginBase):
 
         result["reasons"] = reasons
         return result
-
-    def process_prompt(self, prompt: str) -> str:
-        # Plugin is analysis-only; prompt passes through unchanged
-        return prompt

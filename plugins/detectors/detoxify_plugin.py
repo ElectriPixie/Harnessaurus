@@ -1,4 +1,4 @@
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from typing import Dict
 import torch
 
@@ -7,7 +7,7 @@ try:
 except ImportError:
     Detoxify = None
 
-class DetoxifyPlugin(PluginBase):
+class DetoxifyPlugin(DetectorPlugin):
     def __init__(self, model_name: str = "original", device: str = None, threshold: float = 0.4):
         if Detoxify is None:
             raise ImportError("Detoxify not installed. Run `pip install detoxify`")

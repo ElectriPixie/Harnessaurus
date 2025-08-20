@@ -1,8 +1,8 @@
 import re
 from typing import Dict, List, Any
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 
-class DeceptionDetector(PluginBase):
+class DeceptionDetector(DetectorPlugin):
     Evasive_PHRASES = [
         r"\bI am not able to\b",
         r"\bI cannot provide\b",
@@ -86,9 +86,6 @@ class DeceptionDetector(PluginBase):
             "reasons": reasons,
             "score": score_val,
         }
-
-    def process_prompt(self, prompt: str) -> str:
-        return prompt
 
     def score(self, result: Dict[str, int]) -> int:
         evasive = result.get("evasive_language_count", 0)

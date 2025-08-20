@@ -74,6 +74,7 @@ def main():
     # Context Generators
     parser.add_argument('--generators', nargs='+', required=False, default=[
         'rationalization_generator.RationalizationGenerator',
+        'prompt_generator.PromptGenerator',
         # Add any context-generating plugins here
     ])
 
@@ -97,7 +98,7 @@ def main():
     parser.add_argument("--iterative", action="store_true")
     parser.add_argument("--iterative_exploit", action="store_true")
     parser.add_argument("--homoglyph_replace_prob", type=float, default=1.0)
-    parser.add_argument('--use_generator', type=str, default=None,
+    parser.add_argument('--use_generator', type=str, default="PromptGenerator",
                     help="class name for generator to use")
     args = parser.parse_args()
 
@@ -127,25 +128,58 @@ def main():
         os.fsync(f.fileno())
     print(f"[Saved] Run arguments: {args_json_path}")
 
-    plugin_param_map = {
+    detector_param_map = {
         "forbidden_keyword_detector.ForbiddenKeywordDetector": {"keywords": args.forbidden_keywords},
         "advanced_output_analyzer.AdvancedOutputAnalyzer": {"evasive_phrases_file": args.evasive_phrases},
         "hidden_injection_detector.HiddenPromptInjectionDetector": {"homoglyph_file": "data/homoglyphs/homoglyphs.txt"},
+    }
+    mutator_param_map = {
         "homoglyph_substitutor.HomoglyphSubstitutor": {
             "path": "data/homoglyphs/",
             "datasets": [("homoglyph_set", "homoglyphs.txt")],
             "replace_prob": args.homoglyph_replace_prob,
         },
     }
+    logger_param_map = {}
+    generator_param_map = {}
 
-    plugins = []
-    for spec in args.plugins:
-        params = plugin_param_map.get(spec, {})
+    # Load detectors
+    detectors = []
+    for spec in args.detectors:
+        module_name, class_name = spec.rsplit('.', 1)
+        params = detector_param_map.get(spec, {})
+        detector = load_detector(module_name, **params)
+        detectors.append(detector)
+
+    # Load mutators
+    mutators = []
+    for spec in args.mutators:
+        module_name, class_name = spec.rsplit('.', 1)
+        params = mutator_param_map.get(spec, {})
         if spec == "json_logger.JsonLogger":
             params = dict(params)
             params["timestamp"] = timestamp
-        plugin = load_plugin(spec, **params)
-        plugins.append(plugin)
+        mutator = load_mutator(module_name, **params)
+        mutators.append(mutator)
+
+    # Load loggers
+    loggers = []
+    for spec in args.loggers:
+        module_name, class_name = spec.rsplit('.', 1)
+        params = logger_param_map.get(spec, {})
+        if spec == "json_logger.JsonLogger":
+            params = dict(params)
+            params["timestamp"] = timestamp
+        logger = load_logger(module_name, **params)
+        loggers.append(logger)
+
+    # Load generators
+    generators = []
+    for spec in args.generators:
+        module_name, class_name = spec.rsplit('.', 1)
+        params = generator_param_map.get(spec, {})
+        generator = load_generator(module_name, **params)
+        generators.append(generator)
 
     model = GPTModel(args.server_url, args.model_name)
     aggregator = ResultAggregator()
@@ -187,12 +221,16 @@ def main():
                     loop=not args.mutate_until_accepted,
                     max_mutations=args.max_mutations,
                     mutators=args.mutators,
-                    include_mutated_output=args.use_mutated,
+                    use_mutated=args.use_mutated,
                     run_dir=run_dir,
                     last_mutator_name=args.last_mutator,
+                    detectors=detectors
+                    mutators=mutators
+                    generators=generators
+                    loggers=loggers
                 )
 
-                recs = run_prompt_test(run_prompt_chunk, model, plugins, aggregator)
+                recs = run_prompt_test(run_prompt_chunk, model, aggregator)
                 if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
                     raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
 

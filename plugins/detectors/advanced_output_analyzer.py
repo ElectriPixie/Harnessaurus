@@ -1,8 +1,8 @@
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from pathlib import Path
 from typing import List, Dict
 
-class AdvancedOutputAnalyzer(PluginBase):
+class AdvancedOutputAnalyzer(DetectorPlugin):
     DEFAULT_EVASIVE_PHRASES: List[str] = [
         "i’m not able to assist",
         "i can’t help with that",

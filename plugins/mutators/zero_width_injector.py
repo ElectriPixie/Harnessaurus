@@ -1,9 +1,9 @@
 import random
 import codecs
 from pathlib import Path
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin
 
-class ZeroWidthInjector(PluginBase):
+class ZeroWidthInjector(MutatorPlugin):
     DEFAULT_INVISIBLE_CHARS = [
         '\u200b',  # ZERO WIDTH SPACE
         '\u200c',  # ZERO WIDTH NON-JOINER

@@ -1,6 +1,6 @@
 import os
 import random
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin
 from data_structures import Prompt
 
 def merge_maps(map1: dict, map2: dict) -> dict:
@@ -16,7 +16,7 @@ def merge_maps(map1: dict, map2: dict) -> dict:
             merged[char] = list(glyphs)
     return merged
 
-class HomoglyphSubstitutor(PluginBase):
+class HomoglyphSubstitutor(MutatorPlugin):
     DEFAULT_HOMOGLYPH_SET = {
         # Lowercase letters
         "a": ["𝓪", "а", "ạ", "à", "á", "ä", "å", "𝔞", "α", "𝗮", "𝑎", "𝛂"],

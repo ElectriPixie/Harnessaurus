@@ -119,59 +119,63 @@ class GPTModel:
         return outputs
 
 class PluginManager:
-    def __init__(self, plugins: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
-        self.plugins = plugins
+    def __init__(
+        self,
+        mutators: List[MutatorPlugin],
+        detectors: List[DetectorPlugin],
+        loggers: List[BasePlugin],
+        channel_map: Optional[Dict[str, List[str]]] = None
+    ):
+        self.mutators = mutators
+        self.detectors = detectors
+        self.loggers = loggers
         self.channel_map = channel_map or {}
 
-    def is_multi_mutator(self, plugin: PluginBase) -> bool:
-        return getattr(plugin, "multi_mutator", False)
+    # --- Mutator interface ---
+    def process_prompt(self, prompt: Prompt) -> Prompt:
+        """
+        Apply all mutators to a Prompt or PromptSet.
+        Returns a PromptSet with the resulting prompts.
+        """
+        for mutator in self.mutators:
+            prompt = mutator.process_prompt_set(prompt)
 
-    def process_prompt(self, prompt_text: str, plugins_to_apply: Optional[list] = None, mutation_index: int = 0, last_plugin_name: Optional[str] = None) -> Prompt:
-        if plugins_to_apply is None:
-            active_plugins = self.plugins
-        elif all(isinstance(p, str) for p in plugins_to_apply):
-            name_map = {p.__class__.__name__: p for p in self.plugins}
-            active_plugins = [name_map[n] for n in plugins_to_apply if n in name_map]
-        else:
-            active_plugins = plugins_to_apply
+        return prompt
 
-        prompt_list = [prompt_text]
-        last_plugin = None
-        for plugin in active_plugins:
-            if plugin.__class__.__name__ == last_plugin_name:
-                last_plugin = plugin
-                continue
-            result = plugin.process_prompt("\n".join(prompt_list), mutation_index=mutation_index)
-            if self.is_multi_mutator(plugin):
-                prompt_list = result if isinstance(result, list) else [result]
-            else:
-                prompt_list = [result]
-
-        if last_plugin:
-            result = last_plugin.process_prompt("\n".join(prompt_list), mutation_index=mutation_index)
-            prompt_list = result if self.is_multi_mutator(last_plugin) else [result]
-
-        return Prompt(prompt_list=prompt_list)
-
-    def process_output(self, prompt: Prompt, output: str, plugin_name: str) -> Optional[object]:
-        channels = split_into_channels(output)
-        channels_for_plugin = self.channel_map.get(plugin_name)
-        text_to_send = output
-        if channels_for_plugin:
-            text_to_send = "\n".join([channels.get(ch, "") for ch in channels_for_plugin])
+    # --- Detector interface ---
+    def process_output(self, prompt: Prompt, output: Output, detector_name: str) -> Optional[Output]:
+        """
+        Apply a single detector by name to the given Prompt and Output.
+        Supports channel mapping.
+        """
         try:
-            return self.plugins_by_name()[plugin_name].process_output("\n".join(prompt.prompt_list), text_to_send)
+            detector = self.detectors_by_name()[detector_name]
+            # slice output by channels if mapped
+            channels_for_detector = self.channel_map.get(detector_name)
+            if channels_for_detector and isinstance(output, dict):
+                output_to_pass = {ch: output.get(ch, "") for ch in channels_for_detector}
+            else:
+                output_to_pass = output
+            return detector.process_output(prompt, output_to_pass)
         except Exception:
             traceback.print_exc()
             return None
 
+    # --- Logger interface ---
     def process_log(self, record: Record) -> None:
-        for plugin in self.plugins:
-            if hasattr(plugin, 'on_log'):
-                plugin.on_log(record.to_dict())
+        for logger in self.loggers:
+            if hasattr(logger, "on_log"):
+                logger.on_log(record)
 
-    def plugins_by_name(self) -> Dict[str, PluginBase]:
-        return {p.__class__.__name__: p for p in self.plugins}
+    # --- Helpers ---
+    def mutators_by_name(self) -> Dict[str, MutatorPlugin]:
+        return {m.__class__.__name__: m for m in self.mutators}
+
+    def detectors_by_name(self) -> Dict[str, DetectorPlugin]:
+        return {d.__class__.__name__: d for d in self.detectors}
+
+    def loggers_by_name(self) -> Dict[str, BasePlugin]:
+        return {l.__class__.__name__: l for l in self.loggers}
 
 def run_model_inference(model: GPTModel, prompt: Prompt, iterator: int, max_tokens_per_chunk: int, max_iterations: int, flip_negate: bool) -> Output:
     if iterator == 1:
@@ -187,39 +191,96 @@ def run_model_inference(model: GPTModel, prompt: Prompt, iterator: int, max_toke
     else:
         raise ValueError(f"Unsupported iterator: {iterator}")
 
-def run_prompt_test(run_prompt: RunPrompt, model: GPTModel, plugins: List[PluginBase], aggregator: ResultAggregator, channel_map: Optional[Dict[str, List[str]]] = None) -> List[Record]:
-    pm = PluginManager(plugins, channel_map)
+def get_generator_by_name(run_prompt, generator_name: str):
+    """
+    Return the generator instance from run_prompt.generators matching the class name.
+    """
+    for gen in getattr(run_prompt, "generators", []):
+        if gen.__class__.__name__ == generator_name:
+            return gen
+    return None
+
+
+def _process_outputs(
+    prompt_obj: Prompt,
+    run_prompt: RunPrompt,
+    model: GPTModel,
+    aggregator: ResultAggregator,
+    pm: PluginManager,
+) -> List[Record]:
+    """
+    Handles running mutated outputs with mutators and detectors,
+    including rerun of clean prompt if requested.
+    Operates on the provided prompt_obj, independent of run_prompt.prompt_obj.
+    """
     results: List[Record] = []
-
-    if run_prompt.user_generator is not None:
-        
-
+    iterator = run_prompt.iterator
+    if prompt_obj.has_context:
+       iterator = 4 
     # Run clean output
-    clean_output = run_model_inference(model, run_prompt.prompt_obj, run_prompt.iterator, run_prompt.max_tokens_per_chunk, run_prompt.max_iterations, run_prompt.flip_negate)
-    for plugin in plugins:
-        plugin_name = plugin.__class__.__name__
-        clean_output.analysis[plugin_name] = pm.process_output(run_prompt.prompt_obj, clean_output.raw_output, plugin_name)
+    clean_output = run_model_inference(
+        model,
+        prompt_obj,
+        iterator,
+        run_prompt.max_tokens_per_chunk,
+        run_prompt.max_iterations,
+        run_prompt.flip_negate
+    )
 
-    #exit here if we aren't including mutated outputs
+    # Analyze clean output with detectors
+    for plugin in run_prompt.detectors:
+        plugin_name = plugin.__class__.__name__
+        clean_output.analysis[plugin_name] = pm.process_output(
+            prompt_obj, clean_output.raw_output, plugin_name
+        )
+
+    # Exit early if mutated outputs are not requested
     if not run_prompt.include_mutated_output:
-        record = Record(original_prompt="\n".join(run_prompt.prompt_obj.prompt_list), clean_output=clean_output)
+        record = Record(
+            original_prompt="\n".join(prompt_obj.prompt_list),
+            clean_output=clean_output
+        )
         aggregator.add_record(record)
-        results.append(record)
         pm.process_log(record)
+        results.append(record)
         return results
 
-    #The rest of the function is for use_mutated, it returns before this if it's not set
-
+    # Loop over mutations
     for mutation_index in range(1, run_prompt.max_mutations + 1):
-        mutated_prompt = pm.process_prompt("\n".join(run_prompt.prompt_obj.prompt_list), plugins_to_apply=run_prompt.mutators, mutation_index=mutation_index, last_plugin_name=run_prompt.last_mutator_name)
-        mutated_output = run_model_inference(model, mutated_prompt, run_prompt.iterator, run_prompt.max_tokens_per_chunk, run_prompt.max_iterations, run_prompt.flip_negate)
+        mutated_prompt = pm.process_prompt(prompt_obj)
 
-        for plugin in plugins:
+        if run_prompt.rerun_clean_prompt:
+            clean_output = run_model_inference(
+                model,
+                prompt_obj,
+                iterator,
+                run_prompt.max_tokens_per_chunk,
+                run_prompt.max_iterations,
+                run_prompt.flip_negate
+            )
+
+        mutated_output = run_model_inference(
+            model,
+            mutated_prompt,
+            iterator,
+            run_prompt.max_tokens_per_chunk,
+            run_prompt.max_iterations,
+            run_prompt.flip_negate
+        )
+
+        # Apply detectors to mutated output
+        for plugin in run_prompt.detectors:
             plugin_name = plugin.__class__.__name__
-            mutated_output.analysis[plugin_name] = pm.process_output(mutated_prompt, mutated_output.raw_output, plugin_name)
+            if run_prompt.rerun_clean_prompt:
+                clean_output.analysis[plugin_name] = pm.process_output(
+                    prompt_obj, clean_output.raw_output, plugin_name
+                )
+            mutated_output.analysis[plugin_name] = pm.process_output(
+                mutated_prompt, mutated_output.raw_output, plugin_name
+            )
 
         record = Record(
-            original_prompt="\n".join(run_prompt.prompt_obj.prompt_list),
+            original_prompt="\n".join(prompt_obj.prompt_list),
             mutated_prompt="\n".join(mutated_prompt.prompt_list),
             clean_output=clean_output,
             mutated_output=mutated_output,
@@ -231,9 +292,45 @@ def run_prompt_test(run_prompt: RunPrompt, model: GPTModel, plugins: List[Plugin
         aggregator.add_record(record)
         results.append(record)
 
+        # Stop loop if refusal detector signals acceptance
         if not run_prompt.loop:
             refusal = mutated_output.analysis.get("RefusalDetector", {})
             if refusal.get("status") == "accepted":
                 break
+
+    return results
+
+
+def run_prompt_test(
+    run_prompt: RunPrompt,
+    model: GPTModel,
+    aggregator: ResultAggregator,
+    channel_map: Optional[Dict[str, List[str]]] = None
+) -> List[Record]:
+    pm = PluginManager(
+        mutators=run_prompt.mutators,
+        detectors=run_prompt.detectors,
+        loggers=run_prompt.loggers,
+        channel_map=channel_map
+    )
+
+    results: List[Record] = []
+
+    # If a generator is selected, produce prompts
+    if run_prompt.use_generator:
+        generator = get_generator_by_name(run_prompt, run_prompt.use_generator)
+        generated = generator.generate_from_prompt(run_prompt.prompt_obj)
+
+    prompts_to_run: List[Prompt] = []
+
+    if getattr(generated, "output_type", "single") == "single":
+        prompts_to_run = [generated]
+    elif getattr(generated, "output_type", "single") == "multi":
+        prompts_to_run = generated.prompts
+    else:
+        raise ValueError(f"Unknown generator output_type: {getattr(generated, 'output_type', None)}")
+
+    for prompt_item in prompts_to_run:
+        results.extend(_process_outputs(prompt_item, run_prompt, model, aggregator, pm))
 
     return results

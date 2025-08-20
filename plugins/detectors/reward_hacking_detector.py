@@ -1,10 +1,10 @@
 import re
 import math
 from typing import Optional, List
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from data_structures import Prompt, Output
 
-class RewardHackingDetector(PluginBase):
+class RewardHackingDetector(DetectorPlugin):
     CONFIDENT_PHRASES = [
         "definitely", "certainly", "undoubtedly", "without a doubt",
         "there is no question", "it is clear that", "it is obvious that",
@@ -118,6 +118,3 @@ class RewardHackingDetector(PluginBase):
         }
 
         return output_obj
-
-    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
-        return prompt_obj

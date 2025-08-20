@@ -1,9 +1,9 @@
 # plugins/forbidden_keyword_detector.py
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from pathlib import Path
 from typing import List, Union, Dict, Any
 
-class ForbiddenKeywordDetector(PluginBase):
+class ForbiddenKeywordDetector(DetectorPlugin):
     DEFAULT_KEYWORDS = [
         "hack", "exploit", "bypass", "attack", "malware", "phish", "ransomware",
         "spyware", "backdoor", "ddos", "injection", "payload", "breach",
@@ -39,7 +39,3 @@ class ForbiddenKeywordDetector(PluginBase):
             'flagged': bool(found),
             'found_keywords': found
         }
-
-    def process_prompt(self, prompt: str) -> str:
-        # No prompt modification
-        return prompt

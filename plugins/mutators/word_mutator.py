@@ -1,8 +1,8 @@
 import random
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin
 from data_structures import Prompt
 
-class WordMutator(PluginBase):
+class WordMutator(MutatorPlugin):
 
     def __init__(self, intensity: float = 1.0, seed: int = 42):
         """

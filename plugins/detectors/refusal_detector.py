@@ -1,10 +1,10 @@
 # refusal_detector.py
 import re
 from difflib import SequenceMatcher
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from data_structures import Prompt, Output
 
-class RefusalDetector(PluginBase):
+class RefusalDetector(DetectorPlugin):
     RED = "\033[31m"
     BLUE = "\033[34m"
     CYAN = "\033[36m"
@@ -64,6 +64,3 @@ class RefusalDetector(PluginBase):
         output_obj.analysis[self.__class__.__name__] = {"status": status}
 
         return output_obj
-
-    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
-        return prompt_obj

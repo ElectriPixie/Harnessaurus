@@ -1,8 +1,8 @@
 import re
-from plugin_base import PluginBase
+from plugin_base import PluginBase, DetectorPlugin
 from data_structures import Prompt, Output
 
-class SabotageDetector(PluginBase):
+class SabotageDetector(DetectorPlugin):
     FILE_CORRUPTION_PATTERNS = [
         r"\bdelete\s+all\b", r"\brm\s+-rf\b", r"\bformat\s+drive\b",
         r"\berase\s+disk\b", r"\bcorrupt\b", r"\boverwrite\b", r"\bremove\s+files\b",
@@ -107,7 +107,3 @@ class SabotageDetector(PluginBase):
         }
 
         return output_obj
-
-    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
-        # No modification to prompt
-        return prompt_obj

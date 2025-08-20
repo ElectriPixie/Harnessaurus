@@ -41,7 +41,7 @@ class Prompt:
 
 @dataclass
 class RunPrompt:
-    """Wrapper for prompt + execution settings."""
+    """Wrapper for prompt + execution settings and associated plugins."""
     prompt_obj: Prompt
     iterator: int = 1
     flip_negate: bool = False
@@ -49,12 +49,16 @@ class RunPrompt:
     max_iterations: int = 10
     loop: bool = True
     max_mutations: int = 1
-    mutators: Optional[List[str]] = None
-    include_mutated_output: bool = True
+    mutators: Optional[List[str]] = None        # names of mutators to apply
+    detector_plugins: Optional[List[DetectorPlugin]] = None
+    mutator_plugins: Optional[List[MutatorPlugin]] = None
+    logger_plugins: Optional[List[BasePlugin]] = None
+    generator_plugins: Optional[List[GeneratorBase]] = None
+    use_mutated: bool = True
     rerun_clean_prompt: bool = False
     run_dir: Optional[str] = None
-    last_mutator_name: Optional[str] = None
-    user_generator: Optional[str] = None
+    use_generator: Optional[str] = None
+
 
 
 @dataclass
