@@ -29,10 +29,7 @@ class GeneratorBase(PluginBase):
     """Base class for prompt generators that can produce single or multiple prompts."""
 
     def generate_from_prompt(self, prompt_obj: Prompt, **kwargs) -> Union[Prompt, PromptSet]:
-        """
-        Override in subclasses to produce a single Prompt or a PromptSet.
-        Default behavior returns the original Prompt unchanged.
-        """
+        """Override in subclasses to produce a single Prompt or a PromptSet."""
         return prompt_obj
 
     def generate_from_prompt_set(
@@ -40,11 +37,7 @@ class GeneratorBase(PluginBase):
         prompts: Union[List[Prompt], PromptSet],
         **kwargs
     ) -> PromptSet:
-        """
-        Dispatcher for multiple prompts. Calls `generate_from_prompt` for each item
-        and wraps results into a PromptSet.
-        """
-        # Wrap list in PromptSet if needed
+        """Call `generate_from_prompt` for each item and wrap results into a PromptSet."""
         if isinstance(prompts, list):
             prompts = PromptSet(prompts=prompts)
 
@@ -55,12 +48,122 @@ class GeneratorBase(PluginBase):
                 result_set.add_prompt(res)
             elif isinstance(res, PromptSet):
                 result_set.extend_prompts(list(res))
+            else:
+                raise TypeError(f"Generator returned unexpected type: {type(res)}")
 
-        # Preserve any tags from the original PromptSet
         if hasattr(prompts, "tags"):
             result_set.tags.update(prompts.tags)
 
         return result_set
+
+    def _process_outputs(
+        self,
+        prompt_obj: Prompt,
+        run_prompt: RunPrompt,
+        model: GPTModel,
+        aggregator: ResultAggregator,
+        pm: PluginManager
+    ) -> List[Record]:
+        """
+        Default processing: run inference, apply detectors, log results.
+        Can be overridden by subclasses for custom behavior.
+        """
+        from data_structures import Record  # Only if needed for default implementation
+        results: List[Record] = []
+
+        # Default iterator logic
+        iterator = 4 if getattr(prompt_obj, "has_context", False) else run_prompt.iterator
+
+        # Run clean output first
+        clean_output = run_model_inference(
+            model,
+            prompt_obj,
+            iterator,
+            run_prompt.max_tokens_per_chunk,
+            run_prompt.max_iterations,
+            run_prompt.flip_negate
+        )
+
+        # Run detectors
+        clean_output = pm.process_output(
+            prompt_obj=prompt_obj,
+            output_obj=clean_output,
+            plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+        )
+
+        if not run_prompt.use_mutated:
+            record = Record(
+                original_prompt="\n".join(prompt_obj.prompt_list),
+                mutated_prompt=None,
+                clean_output=clean_output,
+                mutated_output=None,
+                mutation_iteration=0,
+                run_dir=run_prompt.run_dir
+            )
+            aggregator.add_record(record)
+            pm.process_log(record)
+            results.append(record)
+            return results
+
+        # Mutated runs
+        max_mutations = getattr(run_prompt, "max_mutations", 1)
+        for mutation_index in range(1, max_mutations + 1):
+            mutated_prompt = pm.process_prompt(
+                prompt_obj=prompt_obj,
+                plugins_to_apply=getattr(run_prompt, "use_mutators", [])
+            )
+
+            mutated_infer_output = run_model_inference(
+                model,
+                mutated_prompt,
+                iterator,
+                run_prompt.max_tokens_per_chunk,
+                run_prompt.max_iterations,
+                run_prompt.flip_negate
+            )
+
+            mutated_output = pm.process_output(
+                prompt_obj=mutated_prompt,
+                output_obj=mutated_infer_output,
+                plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+            )
+
+            record = Record(
+                original_prompt="\n".join(prompt_obj.prompt_list),
+                mutated_prompt="\n".join(mutated_prompt.prompt_list),
+                clean_output=clean_output,
+                mutated_output=mutated_output,
+                mutation_iteration=mutation_index,
+                run_dir=run_prompt.run_dir
+            )
+            aggregator.add_record(record)
+            pm.process_log(record)
+            results.append(record)
+
+        return results
+
+    def run_generated(
+        self,
+        generated: Union[Prompt, PromptSet],
+        run_prompt: RunPrompt,
+        model: GPTModel,
+        aggregator: ResultAggregator,
+        pm: PluginManager
+    ) -> List[Record]:
+        """Run the generated Prompt or PromptSet through the process_outputs hook."""
+        if isinstance(generated, Prompt):
+            prompts = [generated]
+        elif isinstance(generated, PromptSet):
+            prompts = list(generated)
+        elif isinstance(generated, list) and all(isinstance(p, Prompt) for p in generated):
+            prompts = generated
+        else:
+            raise TypeError(f"Unexpected type returned by generator: {type(generated)}")
+
+        all_records = []
+        for prompt_item in prompts:
+            all_records.extend(self._process_outputs(prompt_item, run_prompt, model, aggregator, pm))
+        return all_records
 
 class MutatorPlugin(PluginBase):
     """Generators that specifically mutate prompts."""

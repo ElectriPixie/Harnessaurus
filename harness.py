@@ -8,7 +8,7 @@ from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
 from data_structures import Prompt, RunPrompt, Output, Record, PromptSet
 from result_aggregator import ResultAggregator
 
-DEBUG = True
+DEBUG = False
 
 def debug_print(*args, **kwargs):
     if DEBUG:
