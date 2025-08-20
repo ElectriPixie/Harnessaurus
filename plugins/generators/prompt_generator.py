@@ -1,6 +1,8 @@
 from typing import Union
 from plugin_base import GeneratorBase
 from data_structures import Prompt, PromptSet
+from runner_utils import run_model_inference
+
 
 class PromptGenerator(GeneratorBase):
     """A trivial generator that returns the prompt as-is."""

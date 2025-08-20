@@ -3,6 +3,7 @@ import random
 from typing import Union, List
 from plugin_base import GeneratorBase
 from data_structures import Prompt, PromptSet, RunPrompt, Record, OutputType
+from runner_utils import run_model_inference
 
 class RationalizationGenerator(GeneratorBase):
     """Generates prompt mutations to elicit internal reasoning, hidden constraints, or safety logic."""

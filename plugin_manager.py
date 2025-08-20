@@ -4,7 +4,7 @@ from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
 from data_structures import Prompt, Output, Record
 from utils import split_into_channels, debug_print
 
-DEBUG=True
+DEBUG=False
 
 class PluginManager:
     def __init__(
