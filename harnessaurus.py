@@ -5,7 +5,7 @@ import json
 import csv
 from datetime import datetime
 
-from plugin_loader import load_plugin
+from plugin_loader import load_plugin, load_detector, load_generator, load_logger, load_mutator
 from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
 from harness import GPTModel, run_prompt_test
@@ -212,7 +212,7 @@ def main():
             for chunk in chunkify(text, args.max_tokens_per_chunk):
                 chunk_prompt = Prompt(prompt_list=[chunk])
                 run_prompt_chunk = RunPrompt(
-                    use_generator=args.use_generator
+                    use_generator=args.use_generator,
                     prompt_obj=chunk_prompt,
                     iterator=iterator,
                     flip_negate=args.flip_negate,
@@ -220,13 +220,12 @@ def main():
                     max_iterations=args.max_iterations,
                     loop=not args.mutate_until_accepted,
                     max_mutations=args.max_mutations,
-                    mutators=args.mutators,
+                    mutators=mutators,   # loaded plugin instances
                     use_mutated=args.use_mutated,
                     run_dir=run_dir,
                     last_mutator_name=args.last_mutator,
-                    detectors=detectors
-                    mutators=mutators
-                    generators=generators
+                    detectors=detectors,
+                    generators=generators,
                     loggers=loggers
                 )
 

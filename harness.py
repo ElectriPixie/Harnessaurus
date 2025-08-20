@@ -244,6 +244,7 @@ def get_generator_by_name(run_prompt, generator_name: str):
     return None
 
 
+# --- _process_outputs ---
 def _process_outputs(
     prompt_obj: Prompt,
     run_prompt: RunPrompt,
@@ -251,15 +252,11 @@ def _process_outputs(
     aggregator: ResultAggregator,
     pm: PluginManager,
 ) -> List[Record]:
-    """
-    Handles running mutated outputs with mutators and detectors,
-    including rerun of clean prompt if requested.
-    Operates on the provided prompt_obj, independent of run_prompt.prompt_obj.
-    """
     results: List[Record] = []
     iterator = run_prompt.iterator
     if prompt_obj.has_context:
-       iterator = 4 
+        iterator = 4 
+
     # Run clean output
     clean_output = run_model_inference(
         model,
@@ -273,12 +270,10 @@ def _process_outputs(
     # Analyze clean output with detectors
     for plugin in run_prompt.detectors:
         plugin_name = plugin.__class__.__name__
-        clean_output.analysis[plugin_name] = pm.process_output(
-            prompt_obj, clean_output.raw_output, plugin_name
-        )
+        pm.process_output(prompt_obj, clean_output, plugin_name)  # pass full Output object
 
     # Exit early if mutated outputs are not requested
-    if not run_prompt.include_mutated_output:
+    if not getattr(run_prompt, "include_mutated_output", True):
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
             clean_output=clean_output
@@ -289,10 +284,10 @@ def _process_outputs(
         return results
 
     # Loop over mutations
-    for mutation_index in range(1, run_prompt.max_mutations + 1):
+    for mutation_index in range(1, getattr(run_prompt, "max_mutations", 1) + 1):
         mutated_prompt = pm.process_prompt(prompt_obj)
 
-        if run_prompt.rerun_clean_prompt:
+        if getattr(run_prompt, "rerun_clean_prompt", False):
             clean_output = run_model_inference(
                 model,
                 prompt_obj,
@@ -301,6 +296,8 @@ def _process_outputs(
                 run_prompt.max_iterations,
                 run_prompt.flip_negate
             )
+            for plugin in run_prompt.detectors:
+                pm.process_output(prompt_obj, clean_output, plugin.__class__.__name__)
 
         mutated_output = run_model_inference(
             model,
@@ -313,14 +310,7 @@ def _process_outputs(
 
         # Apply detectors to mutated output
         for plugin in run_prompt.detectors:
-            plugin_name = plugin.__class__.__name__
-            if run_prompt.rerun_clean_prompt:
-                clean_output.analysis[plugin_name] = pm.process_output(
-                    prompt_obj, clean_output.raw_output, plugin_name
-                )
-            mutated_output.analysis[plugin_name] = pm.process_output(
-                mutated_prompt, mutated_output.raw_output, plugin_name
-            )
+            pm.process_output(mutated_prompt, mutated_output, plugin.__class__.__name__)
 
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
@@ -336,7 +326,7 @@ def _process_outputs(
         results.append(record)
 
         # Stop loop if refusal detector signals acceptance
-        if not run_prompt.loop:
+        if not getattr(run_prompt, "loop", True):
             refusal = mutated_output.analysis.get("RefusalDetector", {})
             if refusal.get("status") == "accepted":
                 break
@@ -350,6 +340,9 @@ def run_prompt_test(
     aggregator: ResultAggregator,
     channel_map: Optional[Dict[str, List[str]]] = None
 ) -> List[Record]:
+    if not getattr(run_prompt, "use_generator", None):
+        raise ValueError("run_prompt.use_generator must be set")
+
     pm = PluginManager(
         mutators=run_prompt.mutators,
         detectors=run_prompt.detectors,
@@ -359,19 +352,13 @@ def run_prompt_test(
 
     results: List[Record] = []
 
-    # If a generator is selected, produce prompts
-    if run_prompt.use_generator:
-        generator = get_generator_by_name(run_prompt, run_prompt.use_generator)
-        generated = generator.generate_from_prompt(run_prompt.prompt_obj)
+    generator = get_generator_by_name(run_prompt, run_prompt.use_generator)
+    if generator is None:
+        raise ValueError(f"Generator '{run_prompt.use_generator}' not found")
 
-    prompts_to_run: List[Prompt] = []
-
-    if getattr(generated, "output_type", "single") == "single":
-        prompts_to_run = [generated]
-    elif getattr(generated, "output_type", "single") == "multi":
-        prompts_to_run = generated.prompts
-    else:
-        raise ValueError(f"Unknown generator output_type: {getattr(generated, 'output_type', None)}")
+    # The generator returns a Prompt (or PromptSet), wrap as list
+    generated = generator.generate_from_prompt(run_prompt.prompt_obj)
+    prompts_to_run: List[Prompt] = [generated]
 
     for prompt_item in prompts_to_run:
         results.extend(_process_outputs(prompt_item, run_prompt, model, aggregator, pm))
