@@ -7,10 +7,11 @@ class BasePromptProcessor:
     Base class for processors that loads all prompts from a file.
     Subclasses can implement __call__() to yield formatted prompt_list dicts.
     """
-    def __init__(self, path: str):
+    def __init__(self, path: str, divisor: int = 1):
         self.path = path
         self.prompts: list[str] = []
         self.load_prompts()
+        self.diviser = divisor
 
     def load_prompts(self) -> list[str]:
         if not self.path or not os.path.isfile(self.path):
@@ -45,6 +46,9 @@ class ReplayPromptProcessor(BasePromptProcessor):
     two lines at a time: the first line is the clean prompt,
     the second line is the mutated prompt.
     """
+    def __init__(self, path: str):
+        super().__init__(path, divisor=2)
+
     def __call__(self) -> Iterable[List[Dict[str, Any]]]:
         i = 0
         while i < len(self.prompts):
