@@ -5,7 +5,7 @@ import traceback
 import re
 from typing import List, Dict, Optional
 from plugin_loader import load_plugin
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin, GeneratorBase
 from result_aggregator import ResultAggregator
 from data_structures import Prompt, RunPrompt, Output, Record
 
@@ -133,7 +133,7 @@ class PluginManager:
         self,
         mutators: List[MutatorPlugin],
         detectors: List[DetectorPlugin],
-        loggers: List[BasePlugin],
+        loggers: List[PluginBase],
         channel_map: Optional[Dict[str, List[str]]] = None
     ):
         self.mutators = mutators
@@ -217,7 +217,7 @@ class PluginManager:
     def detectors_by_name(self) -> Dict[str, DetectorPlugin]:
         return {d.__class__.__name__: d for d in self.detectors}
 
-    def loggers_by_name(self) -> Dict[str, BasePlugin]:
+    def loggers_by_name(self) -> Dict[str, PluginBase]:
         return {l.__class__.__name__: l for l in self.loggers}
 
 def run_model_inference(model: GPTModel, prompt: Prompt, iterator: int, max_tokens_per_chunk: int, max_iterations: int, flip_negate: bool) -> Output:

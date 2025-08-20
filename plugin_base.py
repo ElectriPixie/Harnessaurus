@@ -2,13 +2,13 @@
 from typing import List, Union
 from data_structures import Prompt, PromptSet, Output, Record, OutputType
 
-class BasePlugin:
+class PluginBase:
     """Minimal plugin functionality: shared hooks and metadata."""
     def on_log(self, record_obj: Record) -> None:
         """Optional hook called after a Record is created."""
         pass
 
-class DetectorPlugin(BasePlugin):
+class DetectorPlugin(PluginBase):
     """Plugins that analyze outputs."""
     def process_output(self, prompt_obj: Prompt, output_obj: Output, **kwargs) -> Output:
         if output_obj.analysis is None:
@@ -25,7 +25,7 @@ class DetectorPlugin(BasePlugin):
         prompts = list(prompt_set) if isinstance(prompt_set, PromptSet) else prompt_set
         return [self.process_output(p, o, **kwargs) for p, o in zip(prompts, output_set)]
 
-class GeneratorBase:
+class GeneratorBase(PluginBase):
     """Base class for prompt generators that can produce single or multiple prompts."""
 
     def generate_from_prompt(self, prompt_obj: Prompt, **kwargs) -> Union[Prompt, PromptSet]:
@@ -62,7 +62,7 @@ class GeneratorBase:
 
         return result_set
 
-class MutatorPlugin(BasePlugin):
+class MutatorPlugin(PluginBase):
     """Generators that specifically mutate prompts."""
     def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
         """

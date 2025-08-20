@@ -90,7 +90,7 @@ def main():
     parser.add_argument("--use_mutated", action="store_true", default=False)
     parser.add_argument("--max_mutations", type=int, default=1)
     parser.add_argument("--mutate_until_accepted", action="store_true", default=False)
-    parser.add_argument("--mutators", nargs="+", required=False, default=[])
+    parser.add_argument("--use_mutators", nargs="+", required=False, default=[])
     parser.add_argument("--flip_negate", action="store_true", default=False)
     parser.add_argument("--skip_lines", type=int, default=0)
     parser.add_argument("--last_mutator", default=None)
@@ -219,14 +219,15 @@ def main():
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
                     loop=not args.mutate_until_accepted,
-                    max_mutations=args.max_mutations,
-                    mutators=mutators,   # loaded plugin instances
                     use_mutated=args.use_mutated,
+                    max_mutations=args.max_mutations,
+                    use_mutators=args.use_mutators
                     run_dir=run_dir,
                     last_mutator_name=args.last_mutator,
                     detectors=detectors,
                     generators=generators,
                     loggers=loggers
+                    mutators=mutators,   # loaded plugin instances
                 )
 
                 recs = run_prompt_test(run_prompt_chunk, model, aggregator)

@@ -1,23 +1,35 @@
-# data_structures.py
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from typing import Literal
 
+# Type for output
 OutputType = Literal["single", "multi"]
 
+# ----------------------------
+# Minimal Prompt representation
+# ----------------------------
+@dataclass
+class Prompt:
+    prompt_list: List[str]                     # e.g., ["original", "probe"]
+    has_context: bool = False                  # True if multiple context prompts
+    output_type: OutputType = "single"        # "single" or "multi"
+    tags: Dict[str, Any] = field(default_factory=dict)
+    plugin_meta: Dict[str, Any] = field(default_factory=dict)
+
+# ----------------------------
+# Collection of Prompts
+# ----------------------------
 @dataclass
 class PromptSet:
-    """Wrapper for a collection of Prompt objects (variable-length 'list')."""
-    prompts: List[Prompt] = field(default_factory=list)
-    output_type: OutputType = "multi"  # defaults to multi since it's a set
-    tags: dict = field(default_factory=dict)  # optional structured metadata for the set
+    """Wrapper for a collection of Prompt objects."""
+    prompts: List["Prompt"] = field(default_factory=list)  # Forward reference
+    output_type: OutputType = "multi"
+    tags: Dict[str, Any] = field(default_factory=dict)
 
-    def add_prompt(self, prompt: Prompt) -> None:
-        """Append a single Prompt to the set."""
+    def add_prompt(self, prompt: "Prompt") -> None:
         self.prompts.append(prompt)
 
-    def extend_prompts(self, prompt_list: List[Prompt]) -> None:
-        """Add multiple Prompts to the set."""
+    def extend_prompts(self, prompt_list: List["Prompt"]) -> None:
         self.prompts.extend(prompt_list)
 
     def __len__(self):
@@ -29,52 +41,23 @@ class PromptSet:
     def __getitem__(self, index):
         return self.prompts[index]
 
-@dataclass
-class Prompt:
-    """Minimal prompt representation."""
-    prompt_list: List[str]                  # e.g., ["original", "probe"]
-    has_context: bool = False               # True if multiple context prompts
-    output_type: OutputType = "single"  # restrict to "single" or "multi"
-    tags: Dict[str, any] = field(default_factory=dict)  # structured metadata
-    plugin_meta: dict = field(default_factory=dict)  # metadata per plugin
-
-
-@dataclass
-class RunPrompt:
-    """Wrapper for prompt + execution settings and associated plugins."""
-    prompt_obj: Prompt
-    iterator: int = 1
-    flip_negate: bool = False
-    max_tokens_per_chunk: int = 256
-    max_iterations: int = 10
-    loop: bool = True
-    max_mutations: int = 1
-    mutators: Optional[List[str]] = None        # names of mutators to apply
-    detector_plugins: Optional[List[DetectorPlugin]] = None
-    mutator_plugins: Optional[List[MutatorPlugin]] = None
-    logger_plugins: Optional[List[BasePlugin]] = None
-    generator_plugins: Optional[List[GeneratorBase]] = None
-    use_mutated: bool = True
-    rerun_clean_prompt: bool = False
-    run_dir: Optional[str] = None
-    use_generator: Optional[str] = None
-
-
-
+# ----------------------------
+# Output from model
+# ----------------------------
 @dataclass
 class Output:
-    """Represents a single model output with optional analysis and channel data."""
-    prompt: Prompt                           # Original Prompt
-    raw_output: str                          # Model output text
-    analysis: Dict[str, Any] = field(default_factory=dict)  # Plugin analysis
+    prompt: "Prompt"
+    raw_output: str
+    analysis: Dict[str, Any] = field(default_factory=dict)
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
-    channels: Dict[str, str] = field(default_factory=dict)  # Optional channel-separated text
+    channels: Dict[str, str] = field(default_factory=dict)
 
-
+# ----------------------------
+# Record of prompt execution
+# ----------------------------
 @dataclass
 class Record:
-    """Full record of a prompt run, including mutated outputs."""
     original_prompt: str
     mutated_prompt: str = ""
     clean_output: Optional[Output] = None
@@ -83,7 +66,6 @@ class Record:
     run_dir: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Flatten Record for JSON/CSV export."""
         return {
             "original_prompt": self.original_prompt,
             "mutated_prompt": self.mutated_prompt,
@@ -94,3 +76,25 @@ class Record:
             "analysis_clean": self.clean_output.analysis if self.clean_output else {},
             "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
         }
+
+# ----------------------------
+# RunPrompt wrapper (forward refs for plugins)
+# ----------------------------
+@dataclass
+class RunPrompt:
+    prompt_obj: "Prompt"
+    iterator: int = 1
+    flip_negate: bool = False
+    max_tokens_per_chunk: int = 256
+    max_iterations: int = 10
+    loop: bool = True
+    max_mutations: int = 1
+    mutators: Optional[List[str]] = None
+    detector_plugins: Optional[List["DetectorPlugin"]] = None
+    mutator_plugins: Optional[List["MutatorPlugin"]] = None
+    logger_plugins: Optional[List["BasePlugin"]] = None
+    generator_plugins: Optional[List["GeneratorBase"]] = None
+    use_mutated: bool = True
+    rerun_clean_prompt: bool = False
+    run_dir: Optional[str] = None
+    use_generator: Optional[str] = None
