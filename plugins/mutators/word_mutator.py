@@ -24,14 +24,15 @@ class WordMutator(MutatorPlugin):
     def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
         """
         Scramble words inside the Prompt object according to intensity.
+        Works with dict-style prompt_list entries.
         """
-        new_prompts = []
-        for text in prompt_obj.prompt_list:
-            words = text.split()
+        for chunk in prompt_obj.prompt_list:
+            prompt_text = chunk["text"]  # extract string
+            words = prompt_text.split()
             scrambled_words = [
                 self.scramble_word(w) if random.random() < self.intensity else w
                 for w in words
             ]
-            new_prompts.append(' '.join(scrambled_words))
-        prompt_obj.prompt_list = new_prompts
+            chunk["text"] = ' '.join(scrambled_words)  # write back into dict
+
         return prompt_obj

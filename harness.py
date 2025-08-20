@@ -3,8 +3,7 @@ import re
 import traceback
 from typing import List, Dict, Optional
 import os
-
-from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
+from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin, GeneratorBase
 from data_structures import Prompt, RunPrompt, Output, Record, PromptSet
 from result_aggregator import ResultAggregator
 
@@ -70,14 +69,21 @@ class GPTModel:
             traceback.print_exc()
             return {"choices":[{"message":{"content":""}}]}
 
+    def _get_item_text(self, item) -> str:
+        """Helper to safely extract text from a prompt item."""
+        if isinstance(item, dict):
+            return item.get("text", "")
+        elif isinstance(item, str):
+            return item
+        return ""
+
     def infer_single_pass(self, prompt: Prompt, max_tokens: int = 4096) -> Output:
-        text = "\n".join(prompt.prompt_list)
-        out_text = self._call_server(text, max_tokens)["choices"][0]["message"]["content"]
+        out_text = self._call_server(prompt.output_text, max_tokens)["choices"][0]["message"]["content"]
         return Output(prompt=prompt, raw_output=out_text)
 
     def infer_iterative(self, prompt: Prompt, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> Output:
         combined_text = ""
-        prompt_text = "\n".join(prompt.prompt_list)
+        prompt_text = prompt.output_text
         for _ in range(max_iterations):
             recent_context = combined_text[-max(0, self.max_context_chars - len(prompt_text)):]
             current_prompt = prompt_text + (flip_negation(recent_context) if flip_negate else recent_context)
@@ -90,7 +96,10 @@ class GPTModel:
     def infer_iterative_with_prompt_list(self, prompt: Prompt, max_chunk_tokens: int = 256, max_iterations: int = 10, flip_negate: bool = False) -> List[Output]:
         outputs = []
         accumulated_context = ""
-        for ptext in prompt.prompt_list:
+        for item in prompt.prompt_list:
+            ptext = self._get_item_text(item).strip()
+            if not ptext:
+                continue  # skip empty items
             generated_text = ""
             for _ in range(max_iterations):
                 recent_context = generated_text[-max(0, self.max_context_chars - len(ptext)):]
@@ -104,13 +113,20 @@ class GPTModel:
             accumulated_context += "\n\n" + generated_text
         return outputs
 
+
 # ---------------- PluginManager ----------------
 
 class PluginManager:
-    def __init__(self, mutators: List[MutatorPlugin], detectors: List[DetectorPlugin], loggers: List[PluginBase], channel_map: Optional[Dict[str, List[str]]] = None):
-        self.mutators = mutators
-        self.detectors = detectors
-        self.loggers = loggers
+    def __init__(
+        self,
+        mutators: Optional[List[MutatorPlugin]] = None,
+        detectors: Optional[List[DetectorPlugin]] = None,
+        loggers: Optional[List[PluginBase]] = None,
+        channel_map: Optional[Dict[str, List[str]]] = None
+    ):
+        self.mutators = mutators or []
+        self.detectors = detectors or []
+        self.loggers = loggers or []
         self.channel_map = channel_map or {}
 
     def process_prompt(
@@ -118,52 +134,42 @@ class PluginManager:
         prompt_obj: Prompt,
         plugins_to_apply: Optional[list] = None,
     ) -> Prompt:
-        """
-        Apply prompt mutators.
-
-        Args:
-            prompt: The Prompt object to mutate
-            plugins_to_apply:
-                - None: apply no mutators
-                - []: run all mutators
-                - list[str]: resolve by class-name string
-                - list[MutatorPlugin]: use provided instances
-        """
+        """Apply prompt mutators with support for prompt_list as dicts."""
         debug_print(f"[DEBUG] Original prompt: {prompt_obj.prompt_list}")
         debug_print(f"[DEBUG] plugins_to_apply: {plugins_to_apply}")
 
         # Resolve active plugins
         if plugins_to_apply is None:
-            # None means "disable mutators"
             active_plugins = []
-            debug_print("[DEBUG] No mutators applied (plugins_to_apply=None)")
         elif plugins_to_apply == []:
-            # Empty list means "run all"
             active_plugins = self.mutators
-            debug_print(f"[DEBUG] Using all loaded plugins: {[p.__class__.__name__ for p in active_plugins]}")
         elif all(isinstance(p, str) for p in plugins_to_apply):
             name_to_plugin = {p.__class__.__name__: p for p in self.mutators}
             active_plugins = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
             missing = [name for name in plugins_to_apply if name not in name_to_plugin]
-            debug_print(f"[DEBUG] Requested plugin names: {plugins_to_apply}")
-            debug_print(f"[DEBUG] Resolved plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
             if missing:
                 print(f"[WARNING] These plugin names were not found: {missing}")
         else:
             active_plugins = plugins_to_apply
-            debug_print(f"[DEBUG] Using provided plugin instances: {[p.__class__.__name__ for p in active_plugins]}")
 
         # Apply each mutator in order
         for plugin in active_plugins:
             debug_print(f"[DEBUG] Applying plugin: {plugin.__class__.__name__}")
-            prompt_obj = plugin.process_prompt(
-                prompt_obj=prompt_obj,
-            )
+
+            # Ensure the plugin updates prompt_list items as dicts
+            prompt_obj = plugin.process_prompt(prompt_obj=prompt_obj)
+
+            # Normalize all items to dicts after mutation
+            for i, item in enumerate(prompt_obj.prompt_list):
+                if isinstance(item, str):
+                    prompt_obj.prompt_list[i] = {"text": item}
+                elif isinstance(item, dict) and "text" not in item:
+                    prompt_obj.prompt_list[i]["text"] = str(item)
+
             debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}: {prompt_obj.prompt_list}")
 
         debug_print(f"[DEBUG] Final mutated prompt: {prompt_obj.prompt_list}")
         return prompt_obj
-
 
     def process_output(
         self,
@@ -171,43 +177,24 @@ class PluginManager:
         output_obj: Output,
         plugins_to_apply: Optional[list] = None
     ) -> Output:
-        """
-        Run one or more detector plugins on the output with debug logging.
-
-        Args:
-            prompt: The Prompt object that produced the output.
-            output: The Output object to analyze.
-            plugins_to_apply: Optional list of detectors to run.
-                - If None, runs no detectors.
-                - If empty list, runs all detectors.
-                - If list of str, selects by detector class name.
-                - If list of plugin objects, uses them directly.
-        """
         # Ensure output channels exist
         if not output_obj.channels:
             output_obj.channels = split_into_channels(output_obj)
-            debug_print(f"[DEBUG] Created output channels: {list(output_obj.channels.keys())}")
 
-        # Determine which detectors to run
+        # Resolve detectors
         if plugins_to_apply is None:
-            active_detectors = []  # run nothing
-            debug_print("[DEBUG] plugins_to_apply=None -> running no detectors")
+            active_detectors = []
         elif isinstance(plugins_to_apply, list) and len(plugins_to_apply) == 0:
-            active_detectors = self.detectors  # run all
-            debug_print(f"[DEBUG] plugins_to_apply=[] -> running all detectors: {[d.__class__.__name__ for d in active_detectors]}")
+            active_detectors = self.detectors
         elif all(isinstance(p, str) for p in plugins_to_apply):
             name_to_plugin = {p.__class__.__name__: p for p in self.detectors}
             active_detectors = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
-            debug_print(f"[DEBUG] plugins_to_apply by name -> running: {[d.__class__.__name__ for d in active_detectors]}")
         else:
             active_detectors = plugins_to_apply
-            debug_print(f"[DEBUG] plugins_to_apply as objects -> running: {[d.__class__.__name__ for d in active_detectors]}")
 
-        # Ensure analysis dict exists
         if output_obj.analysis is None:
             output_obj.analysis = {}
 
-        # Run each detector exactly once
         for detector in active_detectors:
             detector_name = detector.__class__.__name__
             channels_for_detector = self.channel_map.get(detector_name)
@@ -216,18 +203,14 @@ class PluginManager:
                 detector_input_text = "\n".join(
                     output_obj.channels.get(ch, "") for ch in channels_for_detector
                 )
-                debug_print(f"[DEBUG] Running {detector_name} on channels: {channels_for_detector}")
             else:
                 detector_input_text = output_obj.raw_output
-                debug_print(f"[DEBUG] Running {detector_name} on raw_output")
 
             detector_input_obj = Output(prompt=prompt_obj, raw_output=detector_input_text)
 
             # Run detector
             analysis_result_obj = detector.process_output(prompt_obj=prompt_obj, output_obj=detector_input_obj)
             output_obj.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
-
-            debug_print(f"[DEBUG] {detector_name} analysis result: {output_obj.analysis[detector_name]}")
 
         return output_obj
 
@@ -239,13 +222,14 @@ class PluginManager:
     def detectors_by_name(self) -> Dict[str, DetectorPlugin]:
         return {d.__class__.__name__: d for d in self.detectors}
 
+
 # ---------------- Runner ----------------
 
-def run_model_inference(model: GPTModel, prompt: Prompt, iterator: int, max_tokens_per_chunk: int, max_iterations: int, flip_negate: bool) -> Output:
+def run_model_inference(model: GPTModel, prompt_obj: Prompt, iterator: int, max_tokens_per_chunk: int, max_iterations: int, flip_negate: bool) -> Output:
     if iterator == 1:
-        return model.infer_single_pass(prompt, max_tokens=max_tokens_per_chunk)
+        return model.infer_single_pass(prompt_obj, max_tokens=max_tokens_per_chunk)
     else:
-        return model.infer_iterative_with_prompt_list(prompt, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate)[-1]
+        return model.infer_iterative_with_prompt_list(prompt_obj, max_chunk_tokens=max_tokens_per_chunk, max_iterations=max_iterations, flip_negate=flip_negate)[-1]
 
 def _process_outputs(
     prompt_obj: Prompt,
@@ -342,7 +326,6 @@ def _process_outputs(
                     break
     return results
 
-
 def run_prompt_test(
     run_prompt: RunPrompt,
     model: GPTModel,
@@ -385,20 +368,7 @@ def run_prompt_test(
     else:
         debug_print(f"[DEBUG] Unexpected type generated: {type(generated)}")
 
-    # Normalize to a flat list of Prompt objects
-    if isinstance(generated, Prompt):
-        prompts_to_run = [generated]
-    elif isinstance(generated, PromptSet):
-        prompts_to_run = list(generated)
-    elif isinstance(generated, list) and all(isinstance(p, Prompt) for p in generated):
-        prompts_to_run = generated
-    else:
-        raise TypeError(
-            f"Generator '{generator.__class__.__name__}' returned unexpected type: {type(generated)}"
-        )
-
-    results = []
-    for prompt_item in prompts_to_run:
-        results.extend(_process_outputs(prompt_item, run_prompt, model, aggregator, pm))
+    # Use the generator's new run_generated method to process the prompts
+    results = generator.run_generated(generated, run_prompt, model, aggregator, pm)
 
     return results

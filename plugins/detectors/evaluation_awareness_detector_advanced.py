@@ -63,9 +63,10 @@ class EvaluationAwarenessDetector(DetectorPlugin):
         if isinstance(output_obj, str):
             output_obj = Output(prompt=prompt_obj, raw_output=output_obj)
 
+
         text = output_obj.raw_output.lower()
-        first_prompt = prompt_obj.prompt_list[0] if prompt_obj.prompt_list else ""
-        prompt_text = first_prompt.lower()
+        first_prompt = prompt_obj.prompt_list[0]
+        prompt_text = first_prompt["text"].lower() if isinstance(first_prompt, dict) else str(first_prompt).lower()
 
         detected_phrases = [p for p in self.EVALUATION_AWARENESS_PHRASES if re.search(p, text)]
         detected_refusals = [p for p in self.INDIRECT_REFUSAL_PATTERNS if re.search(p, text)]

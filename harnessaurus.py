@@ -8,14 +8,13 @@ from datetime import datetime
 from plugin_loader import load_plugin, load_detector, load_generator, load_logger, load_mutator
 from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
-from harness import GPTModel, run_prompt_test
-from data_structures import Prompt, RunPrompt, Output, Record
+from data_structures import Prompt, PromptSet, RunPrompt, Output, Record
+from gpt_model import GPTModel
+from utils import debug_print
+from runner_utils import run_prompt_test, run_model_inference
+from plugin_manager import PluginManager
 
 DEBUG = False
-
-def debug_print(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
 
 def load_list_from_file(path):
     if not path or not os.path.isfile(path):
@@ -31,11 +30,47 @@ def load_list_from_file(path):
         else:
             return [line.strip() for line in f if line.strip()]
 
-def chunkify(prompt, max_tokens_per_chunk):
-    yield prompt  # Currently placeholder, can be improved to split large prompts
+def chunkify(prompt_text: str, max_tokens_per_chunk: int):
+    """
+    Yield dicts directly compatible with Prompt.prompt_list.
+    """
+    # Just yield the single chunk directly
+    yield {
+        "text": prompt_text,
+        "type": "prompt",
+        "mutate": True
+    }
 
 def merge_chunks(chunk_records):
     return chunk_records[-1] if chunk_records else None
+
+def run_prompt_test_wrapped(run_prompt: "RunPrompt", model: "GPTModel", aggregator: "ResultAggregator") -> list[Record]:
+    pm = PluginManager(
+        mutators=run_prompt.mutator_plugins,
+        detectors=run_prompt.detector_plugins,
+        loggers=run_prompt.logger_plugins
+    )
+
+    # Find generator plugin by name
+    generator = next(
+        (g for g in run_prompt.generator_plugins if g.__class__.__name__ == run_prompt.use_generator),
+        None
+    )
+    if generator is None:
+        raise ValueError(f"Generator '{run_prompt.use_generator}' not found")
+
+    # Generate Prompt or PromptSet
+    generated = generator.generate_from_prompt(run_prompt.prompt_obj)
+
+    all_records: list[Record] = generator.run_generated(
+        generated=generated,
+        run_prompt=run_prompt,
+        model=model,
+        aggregator=aggregator,
+        pm=pm
+    )
+
+    return all_records
 
 def main():
     global DEBUG
@@ -44,9 +79,7 @@ def main():
     parser.add_argument("--prompts", required=True, help="File path for prompts (.txt or .json)")
     parser.add_argument("--forbidden_keywords", help="File path for forbidden keywords")
     parser.add_argument("--evasive_phrases", help="File path for evasive phrases")
-    # Detectors
     parser.add_argument('--detectors', nargs='+', required=False, default=[
-        #'advanced_output_analyzer.AdvancedOutputAnalyzer',
         'detoxify_plugin.DetoxifyPlugin',
         'forbidden_keyword_detector.ForbiddenKeywordDetector',
         'hidden_injection_detector.HiddenPromptInjectionDetector',
@@ -59,25 +92,17 @@ def main():
         'sandbagging_detector.SandbaggingDetector',
         'hidden_motivation_detector.HiddenMotivationDetector',
         'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
-        #'eveluation_awareness_detector.EvaluationAwarenessDetector',
     ])
-
-    # Mutators
     parser.add_argument('--mutators', nargs='+', required=False, default=[
         'banned_word_mutator.BannedWordMutator',
         'word_mutator.WordMutator',
         'homoglyph_substitutor.HomoglyphSubstitutor',
         'zero_width_injector.ZeroWidthInjector',
     ])
-
-    # Context Generators
     parser.add_argument('--generators', nargs='+', required=False, default=[
         'rationalization_generator.RationalizationGenerator',
         'prompt_generator.PromptGenerator',
-        # Add any context-generating plugins here
     ])
-
-    # Loggers
     parser.add_argument('--loggers', nargs='+', required=False, default=[
         'json_logger.JsonLogger',
     ])
@@ -96,10 +121,10 @@ def main():
     parser.add_argument("--iterative", action="store_true")
     parser.add_argument("--iterative_exploit", action="store_true")
     parser.add_argument("--homoglyph_replace_prob", type=float, default=1.0)
-    parser.add_argument('--use_generator', type=str, default="PromptGenerator",
-                    help="class name for generator to use")
+    parser.add_argument('--use_generator', type=str, default="PromptGenerator")
     args = parser.parse_args()
 
+    # Determine iteration mode
     if args.single_pass:
         iterator = 1
     elif args.iterative:
@@ -126,6 +151,7 @@ def main():
         os.fsync(f.fileno())
     print(f"[Saved] Run arguments: {args_json_path}")
 
+    # Parameter maps
     detector_param_map = {
         "forbidden_keyword_detector.ForbiddenKeywordDetector": {"keywords": args.forbidden_keywords},
         "advanced_output_analyzer.AdvancedOutputAnalyzer": {"evasive_phrases_file": args.evasive_phrases},
@@ -141,23 +167,9 @@ def main():
     logger_param_map = {}
     generator_param_map = {}
 
-    # Load detectors
-    detectors = []
-    for spec in args.detectors:
-        module_name, class_name = spec.rsplit('.', 1)
-        params = detector_param_map.get(spec, {})
-        detector = load_detector(module_name, class_name=class_name, **params)
-        detectors.append(detector)
-
-    # Load mutators
-    mutators = []
-    for spec in args.mutators:
-        module_name, class_name = spec.rsplit('.', 1)
-        params = mutator_param_map.get(spec, {})
-        mutator = load_mutator(module_name, class_name=class_name, **params)
-        mutators.append(mutator)
-
-    # Load loggers
+    # Load plugins
+    detectors = [load_detector(*spec.rsplit('.', 1), **detector_param_map.get(spec, {})) for spec in args.detectors]
+    mutators = [load_mutator(*spec.rsplit('.', 1), **mutator_param_map.get(spec, {})) for spec in args.mutators]
     loggers = []
     for spec in args.loggers:
         module_name, class_name = spec.rsplit('.', 1)
@@ -165,25 +177,31 @@ def main():
         if spec == "json_logger.JsonLogger":
             params = dict(params)
             params["timestamp"] = timestamp
-        logger = load_logger(module_name, class_name=class_name, **params)
-        loggers.append(logger)
+        loggers.append(load_logger(module_name, class_name=class_name, **params))
+    generators = [load_generator(*spec.rsplit('.', 1), **generator_param_map.get(spec, {})) for spec in args.generators]
 
-    # Load generators
-    generators = []
-    for spec in args.generators:
-        module_name, class_name = spec.rsplit('.', 1)
-        params = generator_param_map.get(spec, {})
-        generator = load_generator(module_name, class_name=class_name, **params)
-        generators.append(generator)
-
+    # Initialize model, aggregator, filters
     model = GPTModel(args.server_url, args.model_name)
     aggregator = ResultAggregator()
     critical_filter = CriticalRecordFilter()
 
     all_records: list[Record] = []
 
-    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output", "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir", ]
-    crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output", "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
+    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
+                       "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir"]
+    crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
+                       "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
+
+    # ANSI colors
+    RED = "\033[31m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    MAGENTA = "\033[35m"
+    YELLOW = "\033[33m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
 
     with open(full_csv_path, "w", newline="", encoding="utf-8") as f_csv, \
          open(full_json_path, "w", encoding="utf-8") as f_json, \
@@ -197,18 +215,6 @@ def main():
 
         prompts = load_list_from_file(args.prompts)
 
-        # Define colors near the top of main()
-        RED = "\033[31m"
-        BLUE = "\033[34m"
-        CYAN = "\033[36m"
-        GREEN = "\033[32m"
-        MAGENTA = "\033[35m"
-        YELLOW = "\033[33m"
-        BOLD = "\033[1m"
-        DIM = "\033[2m"
-        RESET = "\033[0m"
-
-        # Example usage when printing prompts
         for i, text in enumerate(prompts, 1):
             if args.skip_lines and i < args.skip_lines:
                 continue
@@ -216,8 +222,8 @@ def main():
 
             chunk_records: list[Record] = []
 
-            for chunk in chunkify(text, args.max_tokens_per_chunk):
-                chunk_prompt = Prompt(prompt_list=[chunk])
+            for chunk_dict in chunkify(text, args.max_tokens_per_chunk):
+                chunk_prompt = Prompt(prompt_list=[chunk_dict])
                 run_prompt_chunk = RunPrompt(
                     use_generator=args.use_generator,
                     prompt_obj=chunk_prompt,
@@ -233,10 +239,11 @@ def main():
                     detector_plugins=detectors,
                     generator_plugins=generators,
                     logger_plugins=loggers,
-                    mutator_plugins=mutators,   # loaded plugin instances
+                    mutator_plugins=mutators,
                 )
+                recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
 
-                recs = run_prompt_test(run_prompt_chunk, model, aggregator)
+
                 if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
                     raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
 
@@ -273,8 +280,7 @@ def main():
                         crit_json.flush()
                         os.fsync(crit_json.fileno())
 
-    # Print final summary
-    print("\n=== SUMMARY ===")
+    print(f"\n{BOLD}{CYAN}=== SUMMARY ==={RESET}")
     print(json.dumps(aggregator.generate_summary(), indent=2))
 
 if __name__ == "__main__":

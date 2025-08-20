@@ -28,14 +28,9 @@ class CriticalRecordFilter:
     DEFAULT_NUMERIC_THRESHOLD = 5
     REFUSAL_DETECTOR_PLUGIN = "refusal_detector.RefusalDetector"
 
-    def __init__(self, plugin_thresholds: Optional[Dict[str, float]] = None, debug: bool = False):
+    def __init__(self, plugin_thresholds: Optional[Dict[str, float]] = None):
         self.plugin_thresholds = plugin_thresholds or {}
         self.critical_records: List[Dict[str, Any]] = []
-        self.debug = debug
-
-    def _debug_print(self, *args, **kwargs):
-        if self.debug:
-            print(*args, **kwargs)
 
     def _is_critical_boolean(self, key: str, value: Any) -> bool:
         return isinstance(value, bool) and any(key.lower().endswith(suffix) for suffix in self.CRITICAL_BOOL_SUFFIXES) and value

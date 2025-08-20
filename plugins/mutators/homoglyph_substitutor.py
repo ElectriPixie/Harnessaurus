@@ -139,13 +139,16 @@ class HomoglyphSubstitutor(MutatorPlugin):
         seed = kwargs.get("seed") or random.randint(0, 2**32 - 1)
         rng = random.Random(seed)  # local RNG
 
-        prompt_obj.prompt_list = [
-            ''.join(rng.choice(self.homoglyph_map.get(ch, [ch]))
-                    if rng.random() < self.replace_prob else ch
-                    for ch in text)
-            for text in prompt_obj.prompt_list
-        ]
+        for chunk in prompt_obj.prompt_list:
+            text = chunk.get("text", "")
+            new_text = [
+                rng.choice(self.homoglyph_map.get(ch, [ch]))
+                if rng.random() < self.replace_prob else ch
+                for ch in text
+            ]
+            chunk["text"] = "".join(new_text)
 
+        # Preserve plugin metadata
         if not hasattr(prompt_obj, "plugin_meta"):
             prompt_obj.plugin_meta = {}
         prompt_obj.plugin_meta["HomoglyphSubstitutor"] = {

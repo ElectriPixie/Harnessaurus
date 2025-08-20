@@ -10,15 +10,28 @@ OutputType = Literal["single", "multi"]
 # ----------------------------
 @dataclass
 class Prompt:
-    prompt_list: List[str]                     # e.g., ["original", "probe"]
-    has_context: bool = False                  # True if multiple context prompts
-    output_type: OutputType = "single"        # "single" or "multi"
+    prompt_list: List[Dict[str, Any]] = field(default_factory=list)
+    has_context: bool = False
+    output_type: OutputType = "single"
     tags: Dict[str, Any] = field(default_factory=dict)
     plugin_meta: Dict[str, Any] = field(default_factory=dict)
+
+    def _get_item_text(self, item) -> str:
+        if isinstance(item, dict):
+            # Ensure we always return a string, even if 'text' is None
+            return str(item.get("text", "") or "")
+        elif isinstance(item, str):
+            return item
+        return str(item)  # fallback for other types
+
     @property
     def output_text(self) -> str:
-        return self.raw_output
-
+        texts = []
+        for item in self.prompt_list:
+            text = self._get_item_text(item)
+            if text.strip():
+                texts.append(text)
+        return "\n".join(texts)
 # ----------------------------
 # Collection of Prompts
 # ----------------------------
@@ -44,6 +57,9 @@ class PromptSet:
     def __getitem__(self, index):
         return self.prompts[index]
 
+    def all_output_texts(self) -> List[str]:
+        return [p.output_text for p in self.prompts]
+
 # ----------------------------
 # Output from model
 # ----------------------------
@@ -55,6 +71,7 @@ class Output:
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
     channels: Dict[str, str] = field(default_factory=dict)
+
     @property
     def output_text(self) -> str:
         return self.raw_output
@@ -83,6 +100,7 @@ class Record:
             "analysis_clean": self.clean_output.analysis if self.clean_output else {},
             "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
         }
+
 
 # ----------------------------
 # RunPrompt wrapper (forward refs for plugins)

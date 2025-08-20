@@ -52,15 +52,13 @@ class BannedWordMutator(MutatorPlugin):
         return word[0] + ''.join(middle) + word[-1]
 
     def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
-        new_prompts: List[str] = []
-
-        for text in prompt_obj.prompt_list:
-            words = text.split()
-            scrambled_words: List[str] = [
+        for chunk in prompt_obj.prompt_list:
+            prompt_text = chunk["text"]  # extract string from dict
+            words = prompt_text.split()
+            scrambled_words = [
                 self.scramble_word(w) if w.lower().strip('.,!?') in self.banned_words and random.random() < self.intensity else w
                 for w in words
             ]
-            new_prompts.append(' '.join(scrambled_words))
+            chunk["text"] = ' '.join(scrambled_words)  # write back into dict
 
-        prompt_obj.prompt_list = new_prompts
         return prompt_obj

@@ -1,6 +1,6 @@
 import random
-import codecs
 from pathlib import Path
+import codecs
 from plugin_base import MutatorPlugin
 from data_structures import Prompt
 
@@ -18,7 +18,7 @@ class ZeroWidthInjector(MutatorPlugin):
     ]
 
     def __init__(self, invisible_chars_file: str = None, intensity: float = 0.3, seed: int = None):
-        self.intensity = intensity
+        self.intensity = max(0.0, min(intensity, 1.0))
         self.INVISIBLE_CHARS = self.DEFAULT_INVISIBLE_CHARS.copy()
         if invisible_chars_file:
             try:
@@ -41,15 +41,17 @@ class ZeroWidthInjector(MutatorPlugin):
         return chars
 
     def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
-        new_prompts = []
-
-        for text in prompt_obj.prompt_list:
-            result = []
+        """
+        Inject zero-width characters into the "text" field of each prompt_list dict,
+        keeping all other fields intact.
+        """
+        for chunk in prompt_obj.prompt_list:
+            text = chunk.get("text", "")
+            new_text = []
             for ch in text:
-                result.append(ch)
+                new_text.append(ch)
                 if self.INVISIBLE_CHARS and random.random() < self.intensity:
-                    result.append(random.choice(self.INVISIBLE_CHARS))
-            new_prompts.append("".join(result))
+                    new_text.append(random.choice(self.INVISIBLE_CHARS))
+            chunk["text"] = "".join(new_text)
 
-        prompt_obj.prompt_list = new_prompts
         return prompt_obj
