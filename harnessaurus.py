@@ -198,10 +198,22 @@ def main():
 
         prompts = load_list_from_file(args.prompts)
 
+        # Define colors near the top of main()
+        RED = "\033[31m"
+        BLUE = "\033[34m"
+        CYAN = "\033[36m"
+        GREEN = "\033[32m"
+        MAGENTA = "\033[35m"
+        YELLOW = "\033[33m"
+        BOLD = "\033[1m"
+        DIM = "\033[2m"
+        RESET = "\033[0m"
+
+        # Example usage when printing prompts
         for i, text in enumerate(prompts, 1):
             if args.skip_lines and i < args.skip_lines:
                 continue
-            print(f"[Processing] {i}/{len(prompts)} Prompt: {text}")
+            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(prompts)} {BLUE}Prompt: {GREEN}{text}{RESET}")
 
             chunk_records: list[Record] = []
 
