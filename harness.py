@@ -182,7 +182,7 @@ def _process_outputs(
     iterator = 4 if prompt_obj.has_context else run_prompt.iterator
     os.makedirs(run_prompt.run_dir, exist_ok=True)
 
-    # --- Run clean output ---
+    # --- Run clean output first ---
     clean_output = run_model_inference(
         model,
         prompt_obj,
@@ -192,10 +192,7 @@ def _process_outputs(
         run_prompt.flip_negate
     )
 
-    # Apply all detectors to clean output
-    detector_names = [p.__class__.__name__ for p in getattr(run_prompt, "detectors", [])]
     detector_plugins = getattr(run_prompt, "detector_plugins", [])
-    # Make a list of detector names (strings)
     detector_names = []
     for p in detector_plugins:
         if isinstance(p, DetectorPlugin):
@@ -204,60 +201,54 @@ def _process_outputs(
             detector_names.append(p)
         else:
             raise TypeError(f"Unexpected detector type: {type(p)}")
+
+    # --- Run clean output detectors ---
     for name in detector_names:
         clean_output = pm.process_output(prompt_obj, clean_output, name)
 
-    # If mutated outputs not needed, store clean record and return
-    if not getattr(run_prompt, "include_mutated_output", True):
-        record = Record(
-            original_prompt="\n".join(prompt_obj.prompt_list),
-            clean_output=clean_output,
-            run_dir=run_prompt.run_dir
-        )
-        aggregator.add_record(record)
-        pm.process_log(record)
-        results.append(record)
-        return results
-
-    # --- Run mutated outputs ---
     max_mutations = getattr(run_prompt, "max_mutations", 1)
-    for mutation_index in range(1, max_mutations + 1):
-        # Apply mutators to prompt
-        mutated_prompt = pm.process_prompt(prompt_obj, plugins_to_apply=getattr(run_prompt, "mutators", None))
-
-        # Optionally rerun clean prompt for each mutation
-        if getattr(run_prompt, "rerun_clean_prompt", False):
-            clean_output = run_model_inference(
-                model,
-                prompt_obj,
-                iterator,
-                run_prompt.max_tokens_per_chunk,
-                run_prompt.max_iterations,
-                run_prompt.flip_negate
-            )
+    
+    # Include clean output as mutation_index 0, then run mutations
+    for mutation_index in range(max_mutations + 1):
+        if mutation_index == 0:
+            current_prompt = prompt_obj
+            current_output = clean_output
+        else:
+            # Apply mutators to prompt
+            current_prompt = pm.process_prompt(prompt_obj, plugins_to_apply=getattr(run_prompt, "mutators", None))
+            
+            # Optionally rerun clean prompt for each mutation
+            if getattr(run_prompt, "rerun_clean_prompt", False):
+                current_output = run_model_inference(
+                    model,
+                    prompt_obj,
+                    iterator,
+                    run_prompt.max_tokens_per_chunk,
+                    run_prompt.max_iterations,
+                    run_prompt.flip_negate
+                )
+                for name in detector_names:
+                    current_output = pm.process_output(prompt_obj, current_output, name)
+            else:
+                current_output = run_model_inference(
+                    model,
+                    current_prompt,
+                    iterator,
+                    run_prompt.max_tokens_per_chunk,
+                    run_prompt.max_iterations,
+                    run_prompt.flip_negate
+                )
+            
+            # Apply detectors to mutated output
             for name in detector_names:
-                clean_output = pm.process_output(prompt_obj, clean_output, name)
-
-        # Run mutated prompt through model
-        mutated_output = run_model_inference(
-            model,
-            mutated_prompt,
-            iterator,
-            run_prompt.max_tokens_per_chunk,
-            run_prompt.max_iterations,
-            run_prompt.flip_negate
-        )
-
-        # Apply all detectors to mutated output
-        for name in detector_names:
-            mutated_output = pm.process_output(mutated_prompt, mutated_output, name)
+                current_output = pm.process_output(current_prompt, current_output, name)
 
         # Store record
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
-            mutated_prompt="\n".join(mutated_prompt.prompt_list),
+            mutated_prompt="\n".join(current_prompt.prompt_list) if mutation_index > 0 else None,
             clean_output=clean_output,
-            mutated_output=mutated_output,
+            mutated_output=current_output if mutation_index > 0 else None,
             mutation_iteration=mutation_index,
             run_dir=run_prompt.run_dir
         )
@@ -267,12 +258,13 @@ def _process_outputs(
         results.append(record)
 
         # Stop mutation loop if refusal detector triggered
-        refusal = mutated_output.analysis.get("RefusalDetector", {})
+        refusal = current_output.analysis.get("RefusalDetector", {})
         if refusal.get("status") == "refused":
             print("[INFO] Refusal detected by RefusalDetector, stopping mutation loop")
             break
 
     return results
+
 
 def run_prompt_test(
     run_prompt: RunPrompt,
