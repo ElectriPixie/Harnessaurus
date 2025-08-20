@@ -244,7 +244,6 @@ def get_generator_by_name(run_prompt, generator_name: str):
     return None
 
 
-# --- _process_outputs ---
 def _process_outputs(
     prompt_obj: Prompt,
     run_prompt: RunPrompt,
@@ -253,11 +252,9 @@ def _process_outputs(
     pm: PluginManager,
 ) -> List[Record]:
     results: List[Record] = []
-    iterator = run_prompt.iterator
-    if prompt_obj.has_context:
-        iterator = 4 
+    iterator = 4 if prompt_obj.has_context else run_prompt.iterator
 
-    # Run clean output
+    # --- Run clean output ---
     clean_output = run_model_inference(
         model,
         prompt_obj,
@@ -267,10 +264,10 @@ def _process_outputs(
         run_prompt.flip_negate
     )
 
-    # Analyze clean output with detectors
-    for plugin in run_prompt.detectors:
-        plugin_name = plugin.__class__.__name__
-        pm.process_output(prompt_obj, clean_output, plugin_name)  # pass full Output object
+    # Apply all detectors at once (refactored)
+    plugin_names = [p.__class__.__name__ for p in getattr(run_prompt, "detectors", [])]
+    if plugin_names:
+        clean_output = pm.process_output(prompt_obj, clean_output, plugin_names)
 
     # Exit early if mutated outputs are not requested
     if not getattr(run_prompt, "include_mutated_output", True):
@@ -283,10 +280,13 @@ def _process_outputs(
         results.append(record)
         return results
 
-    # Loop over mutations
-    for mutation_index in range(1, getattr(run_prompt, "max_mutations", 1) + 1):
-        mutated_prompt = pm.process_prompt(prompt_obj)
+    # --- Loop over mutations ---
+    max_mutations = getattr(run_prompt, "max_mutations", 1)
+    for mutation_index in range(1, max_mutations + 1):
+        # Apply mutators sequentially
+        mutated_prompt = pm.process_prompt(prompt_obj, plugins_to_apply=getattr(run_prompt, "mutators", None))
 
+        # Optionally rerun clean prompt
         if getattr(run_prompt, "rerun_clean_prompt", False):
             clean_output = run_model_inference(
                 model,
@@ -296,9 +296,10 @@ def _process_outputs(
                 run_prompt.max_iterations,
                 run_prompt.flip_negate
             )
-            for plugin in run_prompt.detectors:
-                pm.process_output(prompt_obj, clean_output, plugin.__class__.__name__)
+            if plugin_names:
+                clean_output = pm.process_output(prompt_obj, clean_output, plugin_names)
 
+        # Run mutated output
         mutated_output = run_model_inference(
             model,
             mutated_prompt,
@@ -309,9 +310,10 @@ def _process_outputs(
         )
 
         # Apply detectors to mutated output
-        for plugin in run_prompt.detectors:
-            pm.process_output(mutated_prompt, mutated_output, plugin.__class__.__name__)
+        if plugin_names:
+            mutated_output = pm.process_output(mutated_prompt, mutated_output, plugin_names)
 
+        # Store record
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
             mutated_prompt="\n".join(mutated_prompt.prompt_list),
@@ -321,8 +323,8 @@ def _process_outputs(
             run_dir=run_prompt.run_dir
         )
 
-        pm.process_log(record)
         aggregator.add_record(record)
+        pm.process_log(record)
         results.append(record)
 
         # Stop loop if refusal detector signals acceptance
@@ -332,7 +334,6 @@ def _process_outputs(
                 break
 
     return results
-
 
 def run_prompt_test(
     run_prompt: RunPrompt,
