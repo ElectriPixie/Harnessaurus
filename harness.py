@@ -15,14 +15,24 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
-def split_into_channels(text: str) -> Dict[str, str]:
+def split_into_channels(output: Output) -> Dict[str, str]:
+    """
+    Extracts channel-separated text from an Output object.
+
+    Args:
+        output: Output instance containing raw_output.
+
+    Returns:
+        Dict mapping channel names to their respective text.
+    """
+    text = output.raw_output
     pattern = re.compile(r"<\|channel\|>(\w+)<\|message\|>")
     matches = list(pattern.finditer(text))
     channels = {}
     for i, match in enumerate(matches):
         channel_name = match.group(1)
         start = match.end()
-        end = matches[i+1].start() if i+1 < len(matches) else len(text)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         channels[channel_name] = text[start:end].strip()
     return channels
 
@@ -146,17 +156,28 @@ class PluginManager:
     def process_output(self, prompt: Prompt, output: Output, detector_name: str) -> Optional[Output]:
         """
         Apply a single detector by name to the given Prompt and Output.
-        Supports channel mapping.
+        Supports channel mapping and stores channels in the Output object.
         """
         try:
             detector = self.detectors_by_name()[detector_name]
-            # slice output by channels if mapped
+
+            # Ensure Output.channels is populated
+            if not output.channels:
+                output.channels = split_into_channels(output)
+
+            # Select relevant channels if channel_map specifies
             channels_for_detector = self.channel_map.get(detector_name)
-            if channels_for_detector and isinstance(output, dict):
-                output_to_pass = {ch: output.get(ch, "") for ch in channels_for_detector}
+            if channels_for_detector:
+                output_to_pass = {ch: output.channels.get(ch, "") for ch in channels_for_detector}
             else:
-                output_to_pass = output
-            return detector.process_output(prompt, output_to_pass)
+                output_to_pass = output.raw_output  # full text if no channels mapped
+
+            # Apply detector
+            analysis_result = detector.process_output(prompt, output_to_pass)
+            output.analysis[detector_name] = analysis_result
+
+            return output
+
         except Exception:
             traceback.print_exc()
             return None

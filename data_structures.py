@@ -63,12 +63,13 @@ class RunPrompt:
 
 @dataclass
 class Output:
-    """Represents a single model output with optional analysis."""
+    """Represents a single model output with optional analysis and channel data."""
     prompt: Prompt                           # Original Prompt
     raw_output: str                          # Model output text
     analysis: Dict[str, Any] = field(default_factory=dict)  # Plugin analysis
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
+    channels: Dict[str, str] = field(default_factory=dict)  # Optional channel-separated text
 
 
 @dataclass
