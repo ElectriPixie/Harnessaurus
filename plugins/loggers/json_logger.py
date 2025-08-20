@@ -15,7 +15,10 @@ class JsonLogger(PluginBase):
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         self.log_file = os.path.join(self.log_dir, f"redteam_{timestamp}.jsonl")
 
-    def on_log(self, record: dict) -> None:
+    def on_log(self, record) -> None:
+        # Ensure we have a dict for JSON serialization
+        record_dict = record.to_dict() if hasattr(record, "to_dict") else record
+
         with self._lock:
             with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(record) + '\n')
+                f.write(json.dumps(record_dict, ensure_ascii=False) + '\n')

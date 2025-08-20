@@ -1,55 +1,37 @@
 import random
 from typing import List
-from plugin_base import PluginBase, MutatorPlugin
+from plugin_base import MutatorPlugin
+from data_structures import Prompt
 
 class BannedWordMutator(MutatorPlugin):
     DEFAULT_BANNED_WORDS: List[str] = [
-        # Tools & Frameworks
         "metasploit", "nmap", "wireshark", "burpsuite", "sqlmap", "hydra", "johntheripper",
-        # Exploits & Attacks
         "exploit", "payload", "vulnerability", "bufferoverflow", "dos", "ddos", "trojan", 
         "malware", "ransomware", "phishing", "keylogger", "backdoor", "shellcode", "rootkit",
-        # Hacking Actions
         "hack", "crack", "breach", "intrude", "penetration", "escalate", "bypass", "spoof",
-        # Sensitive Targets / Methods
         "password", "credentials", "privatekey", "sshkey", "token", "session", "cookie",
-        # Programming / Exploit Languages
         "python", "perl", "ruby", "powershell", "bash", "javascript", "cobaltstrike",
-        # Network & System Terms
         "tcp", "udp", "icmp", "portscan", "proxy", "vpn", "firewall", "router", "server",
-        # Repeated or extended entries
         "intercept", "sniff", "clone", "reverse engineer", "install", "create", "steal",
         "jailbreak", "write", "extract", "perform", "use",
-        # Targets
         "wifi", "website", "database", "email", "sms", "webcam", "social media", "smart home device",
         "atm", "browser", "credit card", "iphone",
-        # Vulnerabilities & exploits
         "buffer overflow", "cross-site scripting", "xss", "two-factor authentication",
         "insecure file upload", "captcha", "firewall rules", "software license verification",
         "hashed passwords", "wep keys", "zero-day",
-        # Networks & communications
         "network traffic", "encrypted communications", "packet sniffing", "man-in-the-middle",
         "ip address", "bluetooth", "ports",
-        # Social engineering
         "fake website", "social engineering"
     ]
 
     def __init__(self, banned_words_file: str = None, intensity: float = 1.0, seed: int = None):
-        """
-        banned_words_file: optional path to a file listing banned words, one per line,
-                           comments start with # and are ignored.
-        intensity: probability (0-1) of scrambling each banned word occurrence.
-        seed: Optional seed for reproducibility.
-        """
         self.intensity = max(0.0, min(intensity, 1.0))
         self.banned_words: List[str] = self.DEFAULT_BANNED_WORDS.copy()
-
         if banned_words_file:
             try:
                 self.banned_words = self.load_banned_words(banned_words_file)
             except FileNotFoundError:
                 pass
-
         if seed is not None:
             random.seed(seed)
 
@@ -63,22 +45,22 @@ class BannedWordMutator(MutatorPlugin):
         return words
 
     def scramble_word(self, word: str) -> str:
-        """Scramble middle letters of a word; first and last letters stay intact."""
         if len(word) <= 3:
             return word
         middle = list(word[1:-1])
         random.shuffle(middle)
         return word[0] + ''.join(middle) + word[-1]
 
-    def process_prompt(self, prompt: str) -> str:
-        words = prompt.split()
-        scrambled_words: List[str] = []
+    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
+        new_prompts: List[str] = []
 
-        for w in words:
-            lw = w.lower().strip('.,!?')  # remove basic punctuation for matching
-            if lw in self.banned_words and random.random() < self.intensity:
-                scrambled_words.append(self.scramble_word(w))
-            else:
-                scrambled_words.append(w)
+        for text in prompt_obj.prompt_list:
+            words = text.split()
+            scrambled_words: List[str] = [
+                self.scramble_word(w) if w.lower().strip('.,!?') in self.banned_words and random.random() < self.intensity else w
+                for w in words
+            ]
+            new_prompts.append(' '.join(scrambled_words))
 
-        return ' '.join(scrambled_words)
+        prompt_obj.prompt_list = new_prompts
+        return prompt_obj

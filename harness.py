@@ -170,7 +170,7 @@ class PluginManager:
 
         # Apply each active mutator in order
         for mutator in active_plugins:
-            prompt = mutator.process_prompt_set(prompt)
+            prompt = mutator.process_prompt(prompt)
 
         return prompt
 
@@ -234,11 +234,8 @@ def run_model_inference(model: GPTModel, prompt: Prompt, iterator: int, max_toke
     else:
         raise ValueError(f"Unsupported iterator: {iterator}")
 
-def get_generator_by_name(run_prompt, generator_name: str):
-    """
-    Return the generator instance from run_prompt.generators matching the class name.
-    """
-    for gen in getattr(run_prompt, "generators", []):
+def get_generator_by_name(generator_list, generator_name: str):
+    for gen in generator_list:
         if gen.__class__.__name__ == generator_name:
             return gen
     return None
@@ -345,15 +342,15 @@ def run_prompt_test(
         raise ValueError("run_prompt.use_generator must be set")
 
     pm = PluginManager(
-        mutators=run_prompt.mutators,
-        detectors=run_prompt.detectors,
-        loggers=run_prompt.loggers,
+        mutators=run_prompt.mutator_plugins,
+        detectors=run_prompt.detector_plugins,
+        loggers=run_prompt.logger_plugins,
         channel_map=channel_map
     )
 
     results: List[Record] = []
 
-    generator = get_generator_by_name(run_prompt, run_prompt.use_generator)
+    generator = get_generator_by_name(run_prompt.generator_plugins, run_prompt.use_generator)
     if generator is None:
         raise ValueError(f"Generator '{run_prompt.use_generator}' not found")
 

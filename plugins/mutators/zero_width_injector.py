@@ -1,7 +1,8 @@
 import random
 import codecs
 from pathlib import Path
-from plugin_base import PluginBase, MutatorPlugin
+from plugin_base import MutatorPlugin
+from data_structures import Prompt
 
 class ZeroWidthInjector(MutatorPlugin):
     DEFAULT_INVISIBLE_CHARS = [
@@ -17,19 +18,13 @@ class ZeroWidthInjector(MutatorPlugin):
     ]
 
     def __init__(self, invisible_chars_file: str = None, intensity: float = 0.3, seed: int = None):
-        """
-        invisible_chars_file: optional path to a file listing invisible characters, one per line,
-                             comments start with # and are ignored.
-        intensity: float (0 to 1) controlling insertion frequency of invisible chars.
-        seed: Optional seed for reproducibility.
-        """
         self.intensity = intensity
         self.INVISIBLE_CHARS = self.DEFAULT_INVISIBLE_CHARS.copy()
         if invisible_chars_file:
             try:
                 self.INVISIBLE_CHARS = self.load_invisible_chars(invisible_chars_file)
             except FileNotFoundError:
-                pass  # Fallback to default list if file not found
+                pass
         if seed is not None:
             random.seed(seed)
 
@@ -40,19 +35,21 @@ class ZeroWidthInjector(MutatorPlugin):
         chars = []
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:
-                line = line.split('#', 1)[0].strip()  # Remove comments and whitespace
-                if not line:
-                    continue
-                # Decode escaped unicode sequences like \u200b to actual char
-                decoded_char = codecs.decode(line, 'unicode_escape')
-                chars.append(decoded_char)
+                line = line.split('#', 1)[0].strip()
+                if line:
+                    chars.append(codecs.decode(line, 'unicode_escape'))
         return chars
 
-    def process_prompt(self, prompt: str) -> str:
-        result = []
-        for ch in prompt:
-            result.append(ch)
-            if self.INVISIBLE_CHARS and random.random() < self.intensity:
-                inv_char = random.choice(self.INVISIBLE_CHARS)
-                result.append(inv_char)
-        return ''.join(result)
+    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
+        new_prompts = []
+
+        for text in prompt_obj.prompt_list:
+            result = []
+            for ch in text:
+                result.append(ch)
+                if self.INVISIBLE_CHARS and random.random() < self.intensity:
+                    result.append(random.choice(self.INVISIBLE_CHARS))
+            new_prompts.append("".join(result))
+
+        prompt_obj.prompt_list = new_prompts
+        return prompt_obj

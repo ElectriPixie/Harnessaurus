@@ -88,6 +88,7 @@ class RunPrompt:
     max_tokens_per_chunk: int = 256
     max_iterations: int = 10
     loop: bool = True
+    use_mutators: Optional[List[str]] = None
     max_mutations: int = 1
     mutators: Optional[List[str]] = None
     detector_plugins: Optional[List["DetectorPlugin"]] = None

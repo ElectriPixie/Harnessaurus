@@ -44,7 +44,6 @@ def main():
     parser.add_argument("--prompts", required=True, help="File path for prompts (.txt or .json)")
     parser.add_argument("--forbidden_keywords", help="File path for forbidden keywords")
     parser.add_argument("--evasive_phrases", help="File path for evasive phrases")
-    parser.add_argument("--plugins", nargs="+", required=False, default=[...], help="List of plugins")
     # Detectors
     parser.add_argument('--detectors', nargs='+', required=False, default=[
         'advanced_output_analyzer.AdvancedOutputAnalyzer',
@@ -148,7 +147,7 @@ def main():
     for spec in args.detectors:
         module_name, class_name = spec.rsplit('.', 1)
         params = detector_param_map.get(spec, {})
-        detector = load_detector(module_name, **params)
+        detector = load_detector(module_name, class_name=class_name, **params)
         detectors.append(detector)
 
     # Load mutators
@@ -156,10 +155,7 @@ def main():
     for spec in args.mutators:
         module_name, class_name = spec.rsplit('.', 1)
         params = mutator_param_map.get(spec, {})
-        if spec == "json_logger.JsonLogger":
-            params = dict(params)
-            params["timestamp"] = timestamp
-        mutator = load_mutator(module_name, **params)
+        mutator = load_mutator(module_name, class_name=class_name, **params)
         mutators.append(mutator)
 
     # Load loggers
@@ -170,7 +166,7 @@ def main():
         if spec == "json_logger.JsonLogger":
             params = dict(params)
             params["timestamp"] = timestamp
-        logger = load_logger(module_name, **params)
+        logger = load_logger(module_name, class_name=class_name, **params)
         loggers.append(logger)
 
     # Load generators
@@ -178,7 +174,7 @@ def main():
     for spec in args.generators:
         module_name, class_name = spec.rsplit('.', 1)
         params = generator_param_map.get(spec, {})
-        generator = load_generator(module_name, **params)
+        generator = load_generator(module_name, class_name=class_name, **params)
         generators.append(generator)
 
     model = GPTModel(args.server_url, args.model_name)
@@ -221,13 +217,12 @@ def main():
                     loop=not args.mutate_until_accepted,
                     use_mutated=args.use_mutated,
                     max_mutations=args.max_mutations,
-                    use_mutators=args.use_mutators
+                    use_mutators=args.use_mutators,
                     run_dir=run_dir,
-                    last_mutator_name=args.last_mutator,
-                    detectors=detectors,
-                    generators=generators,
-                    loggers=loggers
-                    mutators=mutators,   # loaded plugin instances
+                    detector_plugins=detectors,
+                    generator_plugins=generators,
+                    logger_plugins=loggers,
+                    mutator_plugins=mutators,   # loaded plugin instances
                 )
 
                 recs = run_prompt_test(run_prompt_chunk, model, aggregator)
