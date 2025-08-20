@@ -125,29 +125,58 @@ class PluginManager:
             prompt = mutator.process_prompt(prompt)
         return prompt
 
-    def process_output(self, prompt: Prompt, output: Output, detector_name: str) -> Output:
-        detector = self.detectors_by_name()[detector_name]
-
+    def process_output(
+        self,
+        prompt: Prompt,
+        output: Output,
+        plugins_to_apply: Optional[list] = None
+    ) -> Output:
+        """
+        Run one or more detector plugins on the output.
+        
+        Args:
+            prompt: The Prompt object that produced the output.
+            output: The Output object to analyze.
+            plugins_to_apply: Optional list of detectors to run.
+                - If None, runs all detectors.
+                - If list of str, selects by detector class name.
+                - If list of plugin objects, uses them directly.
+        """
         if not output.channels:
             output.channels = split_into_channels(output)
 
-        channels_for_detector = self.channel_map.get(detector_name)
-        if channels_for_detector:
-            detector_input_text = "\n".join(output.channels.get(ch, "") for ch in channels_for_detector)
+        # Resolve which detectors to run
+        if plugins_to_apply is None:
+            active_detectors = self.detectors
+        elif all(isinstance(p, str) for p in plugins_to_apply):
+            name_to_plugin = {p.__class__.__name__: p for p in self.detectors}
+            active_detectors = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
         else:
-            detector_input_text = output.raw_output
-
-        detector_input_obj = Output(prompt=prompt, raw_output=detector_input_text)
-
-        # Run detector – must return Output
-        analysis_result_obj = detector.process_output(prompt, detector_input_obj)
+            active_detectors = plugins_to_apply
 
         # Ensure main output.analysis exists
         if output.analysis is None:
             output.analysis = {}
 
-        # Save the detector's analysis dict directly
-        output.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
+        # Run each detector
+        for detector in active_detectors:
+            detector_name = detector.__class__.__name__
+
+            channels_for_detector = self.channel_map.get(detector_name)
+            if channels_for_detector:
+                detector_input_text = "\n".join(
+                    output.channels.get(ch, "") for ch in channels_for_detector
+                )
+            else:
+                detector_input_text = output.raw_output
+
+            detector_input_obj = Output(prompt=prompt, raw_output=detector_input_text)
+
+            # Run detector (returns Output with analysis)
+            analysis_result_obj = detector.process_output(prompt, detector_input_obj)
+
+            # Save the detector's analysis dict under its name
+            output.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
 
         return output
 
@@ -192,27 +221,16 @@ def _process_outputs(
         run_prompt.flip_negate
     )
 
-    detector_plugins = getattr(run_prompt, "detector_plugins", [])
-    detector_names = []
-    for p in detector_plugins:
-        if isinstance(p, DetectorPlugin):
-            detector_names.append(p.__class__.__name__)
-        elif isinstance(p, str):
-            detector_names.append(p)
-        else:
-            raise TypeError(f"Unexpected detector type: {type(p)}")
-
-    # --- Run detectors on clean output ---
-    for name in detector_names:
-        clean_output = pm.process_output(prompt_obj, clean_output, name)
+    # Always run all detectors on clean output
+    clean_output = pm.process_output(prompt_obj, clean_output)
 
     max_mutations = getattr(run_prompt, "max_mutations", 1)
 
     for mutation_index in range(max_mutations + 1):
-        # Apply mutators to prompt
+        # Apply mutators to prompt (respect run_prompt.mutators)
         mutated_prompt = pm.process_prompt(
             prompt_obj,
-            plugins_to_apply=getattr(run_prompt, "mutators", None)
+            plugins_to_apply=getattr(run_prompt, "use_mutators", None)
         )
 
         # Run mutated prompt through model
@@ -225,9 +243,12 @@ def _process_outputs(
             run_prompt.flip_negate
         )
 
-        # Apply detectors to mutated output
-        for name in detector_names:
-            mutated_output = pm.process_output(mutated_prompt, mutated_output, name)
+        # Apply only selected detectors (if provided)
+        mutated_output = pm.process_output(
+            mutated_prompt,
+            mutated_output,
+            plugins_to_apply=getattr(run_prompt, "detector_plugins", None)
+        )
 
         # Store record
         record = Record(
