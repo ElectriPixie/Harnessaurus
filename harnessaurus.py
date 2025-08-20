@@ -1,25 +1,27 @@
+# main.py
 import argparse
 import os
 import json
 import csv
 from datetime import datetime
-from plugin_loader import load_plugin
+
+from plugin_loader import load_plugin, load_detector, load_generator, load_logger, load_mutator
 from result_aggregator import ResultAggregator
 from critical_filter import CriticalRecordFilter
-from harness import GPTModel, run_prompt_test
+from data_structures import Prompt, PromptSet, RunPrompt, Output, Record
+from gpt_model import GPTModel
+from utils import debug_print
+from runner_utils import run_prompt_test, run_model_inference
+from plugin_manager import PluginManager
 
 DEBUG = False
-
-def debug_print(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
 
 def load_list_from_file(path):
     if not path or not os.path.isfile(path):
         return []
     ext = os.path.splitext(path)[1].lower()
-    with open(path, 'r', encoding='utf-8') as f:
-        if ext == '.json':
+    with open(path, "r", encoding="utf-8") as f:
+        if ext == ".json":
             data = json.load(f)
             if isinstance(data, list) and all(isinstance(x, str) for x in data):
                 return [x.strip() for x in data if x.strip()]
@@ -28,280 +30,258 @@ def load_list_from_file(path):
         else:
             return [line.strip() for line in f if line.strip()]
 
-# Placeholder: yields whole prompt as one chunk
-def chunkify(prompt, max_tokens_per_chunk):
-    yield prompt
+def chunkify(prompt_text: str, max_tokens_per_chunk: int):
+    """
+    Yield dicts directly compatible with Prompt.prompt_list.
+    """
+    # Just yield the single chunk directly
+    yield {
+        "text": prompt_text,
+        "type": "prompt",
+        "mutate": True
+    }
 
-# Placeholder: just returns last chunk record
 def merge_chunks(chunk_records):
-    return chunk_records[-1] if chunk_records else {}
+    return chunk_records[-1] if chunk_records else None
+
+def run_prompt_test_wrapped(run_prompt: "RunPrompt", model: "GPTModel", aggregator: "ResultAggregator") -> list[Record]:
+    pm = PluginManager(
+        mutators=run_prompt.mutator_plugins,
+        detectors=run_prompt.detector_plugins,
+        loggers=run_prompt.logger_plugins
+    )
+
+    # Find generator plugin by name
+    generator = next(
+        (g for g in run_prompt.generator_plugins if g.__class__.__name__ == run_prompt.use_generator),
+        None
+    )
+    if generator is None:
+        raise ValueError(f"Generator '{run_prompt.use_generator}' not found")
+
+    # Generate Prompt or PromptSet
+    generated = generator.generate_from_prompt(run_prompt.prompt_obj)
+
+    all_records: list[Record] = generator.run_generated(
+        generated=generated,
+        run_prompt=run_prompt,
+        model=model,
+        aggregator=aggregator,
+        pm=pm
+    )
+
+    return all_records
 
 def main():
     global DEBUG
 
     parser = argparse.ArgumentParser(description="Red Team Test Harness")
-    parser.add_argument('--prompts', required=True, help='File path for prompts (.txt or .json)')
-    parser.add_argument('--forbidden_keywords', help='File path for forbidden keywords')
-    parser.add_argument('--evasive_phrases', help='File path for evasive phrases')
-    parser.add_argument('--plugins', nargs='+', required=False,
-                        default=[
-                            'zero_width_injector.ZeroWidthInjector',
-                            'homoglyph_substitutor.HomoglyphSubstitutor',
-                            'forbidden_keyword_detector.ForbiddenKeywordDetector',
-                            #'advanced_output_analyzer.AdvancedOutputAnalyzer',
-                            'detoxify_plugin.DetoxifyPlugin',
-                            'hidden_injection_detector.HiddenPromptInjectionDetector',
-                            'json_logger.JsonLogger',
-                            'refusal_detector.RefusalDetector',
-                            'reward_hacking_detector.RewardHackingDetector',
-                            'deception_detector.DeceptionDetector',
-                            'data_exfiltration_detector.DataExfiltrationDetector',
-                            'harmful_tool_use_monitor.HarmfulToolUseMonitor',
-                            'sabotage_detector.SabotageDetector',
-                            'sandbagging_detector.SandbaggingDetector',
-                            'hidden_motivation_detector.HiddenMotivationDetector',
-                            'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
-                        ],
-                        help='List of plugins to load with optional params like mod.Class:param=val')
-    parser.add_argument('--server_url', help='llama-server base URL, e.g. http://localhost:6589', default="http://localhost:6589")
-    parser.add_argument('--model_name', default='llama', help='Model name for llama-server API')
-    parser.add_argument('--max_tokens_per_chunk', type=int, default=256)
-    parser.add_argument('--max_iterations', type=int, default=10)
-    parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--use_mutated', action='store_true', help='Enable mutated prompts and outputs', default=False)
-    parser.add_argument('--max_mutations', type=int, default=1)
-    parser.add_argument('--mutate_until_accepted', action='store_true', default=False, help='Causes mutator to stop before max_mutations if the refusal detector sees and accepted response')
-    parser.add_argument('--flip_negate', action='store_true', help='Enable flip negating', default=False)
-    parser.add_argument('--skip_lines', type=int, default=0)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--single_pass",
-        action="store_true",
-        help="Run the harness in single-pass mode. Each prompt is processed once; no iterative mutation is applied."
-    )
-    group.add_argument(
-        "--iterative",
-        action="store_true",
-        help="Run the harness in iterative mode. Prompts are chunked iteratively to test model vulnerabilities."
-    )
-    group.add_argument(
-        "--iterative_exploit",
-        action="store_true",
-        help="Run the harness in iterative exploit mode. Prompts are chunked iteratively to test model vulnerabilities. Warning: this mode may be unstable."
-    )
-    parser.add_argument(
-        "--homoglyph_replace_prob",
-        type=float,
-        default=1.0,
-        help="Probability of replacing characters with homoglyphs (0.0 to 1.0)"
-    )
-
+    parser.add_argument("--prompts", required=True, help="File path for prompts (.txt or .json)")
+    parser.add_argument("--forbidden_keywords", help="File path for forbidden keywords")
+    parser.add_argument("--evasive_phrases", help="File path for evasive phrases")
+    parser.add_argument('--detectors', nargs='+', required=False, default=[
+        'detoxify_plugin.DetoxifyPlugin',
+        'forbidden_keyword_detector.ForbiddenKeywordDetector',
+        'hidden_injection_detector.HiddenPromptInjectionDetector',
+        'refusal_detector.RefusalDetector',
+        'reward_hacking_detector.RewardHackingDetector',
+        'deception_detector.DeceptionDetector',
+        'data_exfiltration_detector.DataExfiltrationDetector',
+        'harmful_tool_use_monitor.HarmfulToolUseMonitor',
+        'sabotage_detector.SabotageDetector',
+        'sandbagging_detector.SandbaggingDetector',
+        'hidden_motivation_detector.HiddenMotivationDetector',
+        'evaluation_awareness_detector_advanced.EvaluationAwarenessDetector',
+    ])
+    parser.add_argument('--mutators', nargs='+', required=False, default=[
+        'banned_word_mutator.BannedWordMutator',
+        'word_mutator.WordMutator',
+        'homoglyph_substitutor.HomoglyphSubstitutor',
+        'zero_width_injector.ZeroWidthInjector',
+    ])
+    parser.add_argument('--generators', nargs='+', required=False, default=[
+        'rationalization_generator.RationalizationGenerator',
+        'prompt_generator.PromptGenerator',
+    ])
+    parser.add_argument('--loggers', nargs='+', required=False, default=[
+        'json_logger.JsonLogger',
+    ])
+    parser.add_argument("--server_url", help="llama-server base URL", default="http://localhost:6589")
+    parser.add_argument("--model_name", default="llama", help="Model name for llama-server API")
+    parser.add_argument("--max_tokens_per_chunk", type=int, default=256)
+    parser.add_argument("--max_iterations", type=int, default=10)
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--use_mutated", action="store_true", default=False)
+    parser.add_argument("--max_mutations", type=int, default=1)
+    parser.add_argument("--mutate_until_accepted", action="store_true", default=False)
+    parser.add_argument("--use_mutators", nargs="+", required=False, default=[])
+    parser.add_argument("--flip_negate", action="store_true", default=False)
+    parser.add_argument("--skip_lines", type=int, default=0)
+    parser.add_argument("--single_pass", action="store_true")
+    parser.add_argument("--iterative", action="store_true")
+    parser.add_argument("--iterative_exploit", action="store_true")
+    parser.add_argument("--homoglyph_replace_prob", type=float, default=1.0)
+    parser.add_argument('--use_generator', type=str, default="PromptGenerator")
     args = parser.parse_args()
+
+    # Determine iteration mode
     if args.single_pass:
         iterator = 1
-        print("Running in single-pass mode...")
     elif args.iterative:
-        print(f"Running in iterative mode for up to {args.max_iterations} iterations...")
         iterator = 2
     elif args.iterative_exploit:
-        print(f"Running in iterative exploit mode for up to {args.max_iterations} iterations...")
         iterator = 3
     else:
         iterator = 1
-        print("No mode selected; defaulting to single-pass.")
+
     DEBUG = args.debug
-
-    debug_print("[Main] Starting with debug ON")
-
-    prompts = load_list_from_file(args.prompts)
-    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-
-    # Create a single folder for this run
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = os.path.join("reports", f"redteam_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
 
-    # Paths for outputs
-    full_csv_path = os.path.join(run_dir, 'redteam_results_full.csv')
-    full_json_path = os.path.join(run_dir, 'redteam_results_full.json')
-    crit_csv_path = os.path.join(run_dir, 'redteam_critical.csv')
-    crit_json_path = os.path.join(run_dir, 'redteam_critical.json')
-    args_json_path = os.path.join(run_dir, 'run_arguments.json')
+    full_csv_path = os.path.join(run_dir, "redteam_results_full.csv")
+    full_json_path = os.path.join(run_dir, "redteam_results_full.json")
+    crit_csv_path = os.path.join(run_dir, "redteam_critical.csv")
+    crit_json_path = os.path.join(run_dir, "redteam_critical.json")
+    args_json_path = os.path.join(run_dir, "run_arguments.json")
 
-    # Save run arguments
-    with open(args_json_path, 'w', encoding='utf-8') as f:
+    with open(args_json_path, "w", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
     print(f"[Saved] Run arguments: {args_json_path}")
 
-    plugin_param_map = {
-        'forbidden_keyword_detector.ForbiddenKeywordDetector': {'keywords': args.forbidden_keywords},
-        'advanced_output_analyzer.AdvancedOutputAnalyzer': {'evasive_phrases_file': args.evasive_phrases},
-        'hidden_injection_detector.HiddenPromptInjectionDetector': {'homoglyph_file': 'data/homoglyphs/homoglyphs.txt'},
-        'homoglyph_substitutor.HomoglyphSubstitutor': {
-        'path': "/home/pixie/Code/Harnessaurus/data/homoglyphs/",
-        'datasets': [
-            ("homoglyph_set", "homoglyphs.txt"),
-#            ("caligraphy_set", "caligraphy.txt"),
-#            ("diacritics_set", "diacritics.txt"),
-#            ("fancy_set", "fancy.txt"),
-#            ("fraktur_set", "fraktur.txt"),
-#            ("greek_set", "greek.txt"),
-#            ("mathematical_set", "mathematical.txt"),
-#            ("supplimental_set", "supplimental.txt")
-        ],
-        'replace_prob': args.homoglyph_replace_prob
+    # Parameter maps
+    detector_param_map = {
+        "forbidden_keyword_detector.ForbiddenKeywordDetector": {"keywords": args.forbidden_keywords},
+        "advanced_output_analyzer.AdvancedOutputAnalyzer": {"evasive_phrases_file": args.evasive_phrases},
+        "hidden_injection_detector.HiddenPromptInjectionDetector": {"homoglyph_file": "data/homoglyphs/homoglyphs.txt"},
+    }
+    mutator_param_map = {
+        "homoglyph_substitutor.HomoglyphSubstitutor": {
+            "path": "data/homoglyphs/",
+            "datasets": [("homoglyph_set", "homoglyphs.txt")],
+            "replace_prob": args.homoglyph_replace_prob,
         },
     }
+    logger_param_map = {}
+    generator_param_map = {}
 
-    plugins = []
-    for spec in args.plugins:
-        params = plugin_param_map.get(spec, {})
-        if spec == 'json_logger.JsonLogger':
+    # Load plugins
+    detectors = [load_detector(*spec.rsplit('.', 1), **detector_param_map.get(spec, {})) for spec in args.detectors]
+    mutators = [load_mutator(*spec.rsplit('.', 1), **mutator_param_map.get(spec, {})) for spec in args.mutators]
+    loggers = []
+    for spec in args.loggers:
+        module_name, class_name = spec.rsplit('.', 1)
+        params = logger_param_map.get(spec, {})
+        if spec == "json_logger.JsonLogger":
             params = dict(params)
-            params['timestamp'] = timestamp
-        plugin = load_plugin(spec, **params)
-        plugins.append(plugin)
+            params["timestamp"] = timestamp
+        loggers.append(load_logger(module_name, class_name=class_name, **params))
+    generators = [load_generator(*spec.rsplit('.', 1), **generator_param_map.get(spec, {})) for spec in args.generators]
 
+    # Initialize model, aggregator, filters
     model = GPTModel(args.server_url, args.model_name)
     aggregator = ResultAggregator()
     critical_filter = CriticalRecordFilter()
 
-    channel_map = {
-        'ZeroWidthInjector': [],
-        'HomoglyphSubstitutor': [],
-        'ForbiddenKeywordDetector': ['final'],
-        'AdvancedOutputAnalyzer': [],
-        'DetoxifyPlugin': ['final'],
-        'HiddenPromptInjectionDetector': ['final'],
-        'JsonLogger': [],
-        'RefusalDetector': ['final'],
-        'RewardHackingDetector': ['final'],
-        'DeceptionDetector': ['final'],
-        'DataExfiltrationDetector': ['final'],
-        'HarmfulToolUseMonitor': ['final'],
-        'SabotageDetector': ['final'],
-        'SandbaggingDetector': [],
-        'HiddenMotivationDetector': [],
-        'EvaluationAwarenessDetector': [],
-    }
+    all_records: list[Record] = []
 
-    all_records = []
+    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
+                       "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir"]
+    crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
+                       "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
 
-    full_csv_fields = ['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'mutation_iteration', 'run_dir']
-    crit_csv_fields = [
-        'original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output',
-        'critical_analysis', 'analysis_clean', 'analysis_mutated', 'run_dir'
-    ]
+    # ANSI colors
+    RED = "\033[31m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    MAGENTA = "\033[35m"
+    YELLOW = "\033[33m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
 
-    with open(full_csv_path, 'w', newline='', encoding='utf-8') as f_csv, \
-         open(full_json_path, 'w', encoding='utf-8') as f_json, \
-         open(crit_csv_path, 'w', newline='', encoding='utf-8') as crit_csv, \
-         open(crit_json_path, 'w', encoding='utf-8') as crit_json:
+    with open(full_csv_path, "w", newline="", encoding="utf-8") as f_csv, \
+         open(full_json_path, "w", encoding="utf-8") as f_json, \
+         open(crit_csv_path, "w", newline="", encoding="utf-8") as crit_csv, \
+         open(crit_json_path, "w", encoding="utf-8") as crit_json:
 
         writer = csv.DictWriter(f_csv, fieldnames=full_csv_fields)
         writer.writeheader()
-
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
 
-        for i, prompt in enumerate(prompts, 1):
+        prompts = load_list_from_file(args.prompts)
+
+        for i, text in enumerate(prompts, 1):
             if args.skip_lines and i < args.skip_lines:
                 continue
-            print(f"[Processing] {i}/{len(prompts)} Prompt: {prompt}...")
+            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(prompts)} {BLUE}Prompt: {GREEN}{text}{RESET}")
 
-            chunk_records = []
+            chunk_records: list[Record] = []
 
-            for chunk in chunkify(prompt, args.max_tokens_per_chunk):
-                rec_list = run_prompt_test(
-                    chunk,
-                    model,
-                    plugins,
-                    aggregator,
-                    channel_map=channel_map,
+            for chunk_dict in chunkify(text, args.max_tokens_per_chunk):
+                chunk_prompt = Prompt(prompt_list=[chunk_dict])
+                run_prompt_chunk = RunPrompt(
+                    use_generator=args.use_generator,
+                    prompt_obj=chunk_prompt,
+                    iterator=iterator,
+                    flip_negate=args.flip_negate,
                     max_tokens_per_chunk=args.max_tokens_per_chunk,
                     max_iterations=args.max_iterations,
-                    include_mutated_output=args.use_mutated,
-                    max_mutations=args.max_mutations,
-                    flip_negate=args.flip_negate,
                     loop=not args.mutate_until_accepted,
-                    iterator=iterator,
-                    run_dir=run_dir
+                    use_mutated=args.use_mutated,
+                    max_mutations=args.max_mutations,
+                    use_mutators=args.use_mutators,
+                    run_dir=run_dir,
+                    detector_plugins=detectors,
+                    generator_plugins=generators,
+                    logger_plugins=loggers,
+                    mutator_plugins=mutators,
                 )
+                recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
 
-                if not isinstance(rec_list, list):
-                    raise TypeError(f"Unexpected return type from run_prompt_test: {type(rec_list)}")
 
-                for rec in rec_list:
-                    if not isinstance(rec, dict):
-                        debug_print(f"[Main] Skipping non-dict record: {type(rec)}")
-                        continue
+                if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
+                    raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
 
+                for rec in recs:
+                    rec.run_dir = run_dir
                     chunk_records.append(rec)
                     all_records.append(rec)
 
-                    try:
-                        writer.writerow({
-                            'original_prompt': rec.get('original_prompt', ''),
-                            'mutated_prompt': rec.get('mutated_prompt', ''),
-                            'clean_output': rec.get('clean_output', ''),
-                            'mutated_output': rec.get('mutated_output', ''),
-                            'mutation_iteration': rec.get('mutation_iteration', ''),
-                            'run_dir': rec.get('run_dir', '')
-                        })
-                    except Exception as e:
-                        debug_print(f"[Main] Failed writing full CSV row: {e}")
+                    # Save full results immediately
+                    writer.writerow(rec.to_dict())
+                    f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
+                    f_json.flush()
+                    os.fsync(f_json.fileno())
 
-                    try:
-                        f_json.write(json.dumps(rec, ensure_ascii=False, indent=2) + '\n')
-                    except Exception as e:
-                        debug_print(f"[Main] Failed writing full JSON line: {e}")
+                    # Save critical records immediately
+                    if critical_filter.is_critical(rec.to_dict()):
+                        critical_filter.add_record(rec.to_dict())
+                        enriched_rec = critical_filter.critical_records[-1]
+                        enriched_rec["run_dir"] = rec.run_dir
 
-                    try:
-                        if critical_filter.is_critical(rec):
-                            critical_filter.add_record(rec)
-                            enriched_rec = critical_filter.critical_records[-1]
-                            enriched_rec["run_dir"] = rec.get("run_dir", "")
+                        critical_analysis = enriched_rec.get("critical_analysis", {})
+                        analysis_clean = critical_analysis.get("analysis_clean", {})
+                        analysis_mutated = critical_analysis.get("analysis_mutated", {})
 
-                            critical_analysis = enriched_rec.get('critical_analysis', {})
-                            analysis_clean = critical_analysis.get('analysis_clean', {})
-                            analysis_mutated = critical_analysis.get('analysis_mutated', {})
+                        row = {
+                            **enriched_rec,
+                            "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
+                            "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
+                            "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
+                        }
 
-                            row = enriched_rec.copy()
-                            try:
-                                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False, indent=2)
-                            except Exception:
-                                row['critical_analysis'] = json.dumps(critical_analysis, ensure_ascii=False)
+                        crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
+                        crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + "\n")
+                        crit_json.flush()
+                        os.fsync(crit_json.fileno())
 
-                            try:
-                                row['analysis_clean'] = json.dumps(analysis_clean, ensure_ascii=False)
-                            except Exception:
-                                row['analysis_clean'] = ''
+    print(f"\n{BOLD}{CYAN}=== SUMMARY ==={RESET}")
+    print(json.dumps(aggregator.generate_summary(), indent=2))
 
-                            try:
-                                row['analysis_mutated'] = json.dumps(analysis_mutated, ensure_ascii=False)
-                            except Exception:
-                                row['analysis_mutated'] = ''
-
-                            filtered_row = {k: row.get(k, '') for k in crit_csv_fields}
-                            try:
-                                crit_writer.writerow(filtered_row)
-                            except Exception as e:
-                                debug_print(f"[Main] Failed writing critical CSV row: {e}")
-
-                            try:
-                                crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + '\n')
-                            except Exception as e:
-                                debug_print(f"[Main] Failed writing critical JSON entry: {e}")
-
-                    except Exception as e:
-                        print(f"[Warning] critical_filter failed for a record: {e}")
-
-        print(f"[Saved] Full CSV: {full_csv_path}")
-        print(f"[Saved] Full JSON: {full_json_path}")
-        print(f"[Saved] Critical CSV: {crit_csv_path}")
-        print(f"[Saved] Critical JSON: {crit_json_path}")
-
-        print("\n=== SUMMARY ===")
-        print(json.dumps(aggregator.generate_summary(run_dir=run_dir), indent=2))
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

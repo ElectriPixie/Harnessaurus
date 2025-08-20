@@ -1,6 +1,7 @@
 import os
 import random
-from plugin_base import PluginBase
+from plugin_base import PluginBase, MutatorPlugin
+from data_structures import Prompt
 
 def merge_maps(map1: dict, map2: dict) -> dict:
     """
@@ -15,9 +16,7 @@ def merge_maps(map1: dict, map2: dict) -> dict:
             merged[char] = list(glyphs)
     return merged
 
-
-class HomoglyphSubstitutor(PluginBase):
-    # Default datasets: full combined set or optional modular datasets
+class HomoglyphSubstitutor(MutatorPlugin):
     DEFAULT_HOMOGLYPH_SET = {
         # Lowercase letters
         "a": ["𝓪", "а", "ạ", "à", "á", "ä", "å", "𝔞", "α", "𝗮", "𝑎", "𝛂"],
@@ -89,32 +88,18 @@ class HomoglyphSubstitutor(PluginBase):
     }
 
     DEFAULT_DATASETS = [
-        ("homoglyph_set", "homoglyphs.txt"), # full combined set
-        #("caligraphy_set", "caligraphy.txt"),
-        #("diacritics_set", "diacritics.txt"),
-        #("fancy_set", "fancy.txt"),
-        #("fraktur_set", "fraktur.txt"),
-        #("greek_set", "greek.txt"),
-        #("mathematical_set", "mathematical.txt"),
-        #("supplimental_set", "supplimental.txt")
-        # add more datasets here
+        ("homoglyph_set", "homoglyphs.txt"),
     ]
 
     def __init__(self, path="/home/pixie/Code/Harnessaurus/data/homoglyphs/", datasets=None, replace_prob: float = 1.0):
-        """
-        Initialize the loader.
-        Args:
-            path (str): Path to the folder containing dataset files.
-            datasets (list): Optional list of datasets to load.
-        """
         self.debug = False
         self.path = path
         self.datasets = datasets or self.DEFAULT_DATASETS
         self.homoglyph_map = {}
         self.replace_prob = replace_prob
         self.load_all_datasets()
-        if(self.debug):
-            self.debug_print_merged_map()  # Debug output of the final merged map
+        if self.debug:
+            self.debug_print_merged_map()
 
     def update_probability(self, replace_prob: float = 1.0):
         self.replace_prob = replace_prob
@@ -122,22 +107,21 @@ class HomoglyphSubstitutor(PluginBase):
     def load_all_datasets(self):
         """
         Load all datasets in self.datasets and merge them into homoglyph_map.
+        If a dataset file fails to load, fall back to DEFAULT_HOMOGLYPH_SET.
         """
         for name, filename in self.datasets:
-            full_path = os.path.join(self.path, filename)  # Use os.path.join for safe path concatenation
+            full_path = os.path.join(self.path, filename)
             try:
                 dataset_map = self.load_homoglyphs(full_path)
                 self.homoglyph_map = merge_maps(self.homoglyph_map, dataset_map)
                 print(f"Loaded {name} from {filename}")
             except (FileNotFoundError, IOError):
-                print(f"Warning: Could not load {name} ({filename})")
+                print(f"Warning: Could not load {name} ({filename}), using DEFAULT_HOMOGLYPH_SET")
+                # Merge default set only if homoglyph_map is empty
+                if not self.homoglyph_map:
+                    self.homoglyph_map = merge_maps(self.homoglyph_map, self.DEFAULT_HOMOGLYPH_SET)
 
     def load_homoglyphs(self, filepath):
-        """
-        Load a single homoglyph dataset file.
-        Format: base_char homoglyph1 homoglyph2 ...
-        Ignores empty lines and comments starting with '#'.
-        """
         mapping = {}
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
@@ -151,36 +135,30 @@ class HomoglyphSubstitutor(PluginBase):
                     mapping[base_char] = homoglyphs
         return mapping
 
-    def process_prompt(self, prompt: str) -> str:
-        """
-        Convert a string using the current homoglyph map.
-        Each character that exists in the map is randomly replaced by one of its homoglyphs
-        with a probability of `replace_prob`. Other characters remain unchanged.
-        
-        Args:
-            prompt (str): The input string to convert.
-            replace_prob (float): Probability (0.0 to 1.0) that a character is replaced.
-        
-        Returns:
-            str: The string with some characters replaced by homoglyphs.
-        """
+    def process_prompt(self, prompt_obj: Prompt, **kwargs) -> Prompt:
+        seed = kwargs.get("seed") or random.randint(0, 2**32 - 1)
+        rng = random.Random(seed)  # local RNG
 
-        result_chars = []
+        for chunk in prompt_obj.prompt_list:
+            text = chunk.get("text", "")
+            new_text = [
+                rng.choice(self.homoglyph_map.get(ch, [ch]))
+                if rng.random() < self.replace_prob else ch
+                for ch in text
+            ]
+            chunk["text"] = "".join(new_text)
 
-        for ch in prompt:
-            if ch in self.homoglyph_map and random.random() < self.replace_prob:
-                result_chars.append(random.choice(self.homoglyph_map[ch]))
-            else:
-                result_chars.append(ch)
+        # Preserve plugin metadata
+        if not hasattr(prompt_obj, "plugin_meta"):
+            prompt_obj.plugin_meta = {}
+        prompt_obj.plugin_meta["HomoglyphSubstitutor"] = {
+            "seed": seed,
+            "replace_prob": self.replace_prob
+        }
 
-        return ''.join(result_chars)
+        return prompt_obj
 
     def debug_print_merged_map(self, max_chars=None):
-        """
-        Print the final merged homoglyph map for debugging purposes.
-        Args:
-            max_chars (int or None): Maximum number of entries to print. None prints all.
-        """
         print("\n=== Final Merged Homoglyph Map ===")
         count = 0
         for base_char, glyphs in self.homoglyph_map.items():

@@ -8,3 +8,5 @@ logs/
 *.log
 notes
 interesting/
+broken/
+plugins/old/
