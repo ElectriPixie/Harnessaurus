@@ -13,22 +13,22 @@ from gpt_model import GPTModel
 from utils import debug_print
 from runner_utils import run_prompt_test, run_model_inference
 from plugin_manager import PluginManager
+from prompt_processor import BasePromptProcessor, ReplayPromptProcessor
+from typing import Type
 
 DEBUG = False
 
-def load_list_from_file(path):
-    if not path or not os.path.isfile(path):
-        return []
-    ext = os.path.splitext(path)[1].lower()
-    with open(path, "r", encoding="utf-8") as f:
-        if ext == ".json":
-            data = json.load(f)
-            if isinstance(data, list) and all(isinstance(x, str) for x in data):
-                return [x.strip() for x in data if x.strip()]
-            else:
-                raise ValueError(f"{path} must be a JSON array of strings")
-        else:
-            return [line.strip() for line in f if line.strip()]
+
+PROCESSOR_MAP = {
+    "base": BasePromptProcessor,
+    "replay": ReplayPromptProcessor,
+}
+
+def make_processor(name: str, path: str) -> BasePromptProcessor:
+    cls: Type[BasePromptProcessor] = PROCESSOR_MAP.get(name.lower())
+    if not cls:
+        raise ValueError(f"Unknown processor '{name}', valid options: {list(PROCESSOR_MAP.keys())}")
+    return cls(path)
 
 def chunkify(prompt_text: str, max_tokens_per_chunk: int):
     """
@@ -122,6 +122,12 @@ def main():
     parser.add_argument("--iterative_exploit", action="store_true")
     parser.add_argument("--homoglyph_replace_prob", type=float, default=1.0)
     parser.add_argument('--use_generator', type=str, default="PromptGenerator")
+    parser.add_argument(
+        "--processor",
+        choices=["base", "replay"],  # add more as needed
+        default="base",
+        help="Which prompt processor to use"
+    )
     args = parser.parse_args()
 
     # Determine iteration mode
@@ -213,72 +219,76 @@ def main():
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
 
-        prompts = load_list_from_file(args.prompts)
+        processor = BasePromptProcessor(args.prompts)
 
-        for i, text in enumerate(prompts, 1):
+
+        for i, prompt_list in enumerate(processor(), 1):
             if args.skip_lines and i < args.skip_lines:
                 continue
-            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(prompts)} {BLUE}Prompt: {GREEN}{text}{RESET}")
+
+            # Preview text for logging
+            text_preview = ", ".join([p["text"] for p in prompt_list])
+            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(processor.prompts)} {BLUE}Prompt: {GREEN}{text_preview}{RESET}")
 
             chunk_records: list[Record] = []
 
-            for chunk_dict in chunkify(text, args.max_tokens_per_chunk):
-                chunk_prompt = Prompt(prompt_list=[chunk_dict])
-                run_prompt_chunk = RunPrompt(
-                    use_generator=args.use_generator,
-                    prompt_obj=chunk_prompt,
-                    iterator=iterator,
-                    flip_negate=args.flip_negate,
-                    max_tokens_per_chunk=args.max_tokens_per_chunk,
-                    max_iterations=args.max_iterations,
-                    loop=not args.mutate_until_accepted,
-                    use_mutated=args.use_mutated,
-                    max_mutations=args.max_mutations,
-                    use_mutators=args.use_mutators,
-                    run_dir=run_dir,
-                    detector_plugins=detectors,
-                    generator_plugins=generators,
-                    logger_plugins=loggers,
-                    mutator_plugins=mutators,
-                )
-                recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
+            # Wrap prompt_list in Prompt object directly
+            chunk_prompt = Prompt(prompt_list=prompt_list)
+            run_prompt_chunk = RunPrompt(
+                use_generator=args.use_generator,
+                prompt_obj=chunk_prompt,
+                iterator=iterator,
+                flip_negate=args.flip_negate,
+                max_tokens_per_chunk=args.max_tokens_per_chunk,
+                max_iterations=args.max_iterations,
+                loop=not args.mutate_until_accepted,
+                use_mutated=args.use_mutated,
+                max_mutations=args.max_mutations,
+                use_mutators=args.use_mutators,
+                run_dir=run_dir,
+                detector_plugins=detectors,
+                generator_plugins=generators,
+                logger_plugins=loggers,
+                mutator_plugins=mutators,
+            )
 
+            recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
 
-                if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
-                    raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
+            if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
+                raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
 
-                for rec in recs:
-                    rec.run_dir = run_dir
-                    chunk_records.append(rec)
-                    all_records.append(rec)
+            for rec in recs:
+                rec.run_dir = run_dir
+                chunk_records.append(rec)
+                all_records.append(rec)
 
-                    # Save full results immediately
-                    writer.writerow(rec.to_dict())
-                    f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
-                    f_json.flush()
-                    os.fsync(f_json.fileno())
+                # Save full results immediately
+                writer.writerow(rec.to_dict())
+                f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
+                f_json.flush()
+                os.fsync(f_json.fileno())
 
-                    # Save critical records immediately
-                    if critical_filter.is_critical(rec.to_dict()):
-                        critical_filter.add_record(rec.to_dict())
-                        enriched_rec = critical_filter.critical_records[-1]
-                        enriched_rec["run_dir"] = rec.run_dir
+                # Save critical records immediately
+                if critical_filter.is_critical(rec.to_dict()):
+                    critical_filter.add_record(rec.to_dict())
+                    enriched_rec = critical_filter.critical_records[-1]
+                    enriched_rec["run_dir"] = rec.run_dir
 
-                        critical_analysis = enriched_rec.get("critical_analysis", {})
-                        analysis_clean = critical_analysis.get("analysis_clean", {})
-                        analysis_mutated = critical_analysis.get("analysis_mutated", {})
+                    critical_analysis = enriched_rec.get("critical_analysis", {})
+                    analysis_clean = critical_analysis.get("analysis_clean", {})
+                    analysis_mutated = critical_analysis.get("analysis_mutated", {})
 
-                        row = {
-                            **enriched_rec,
-                            "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
-                            "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
-                            "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
-                        }
+                    row = {
+                        **enriched_rec,
+                        "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
+                        "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
+                        "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
+                    }
 
-                        crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
-                        crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + "\n")
-                        crit_json.flush()
-                        os.fsync(crit_json.fileno())
+                    crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
+                    crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + "\n")
+                    crit_json.flush()
+                    os.fsync(crit_json.fileno())
 
     print(f"\n{BOLD}{CYAN}=== SUMMARY ==={RESET}")
     print(json.dumps(aggregator.generate_summary(), indent=2))
