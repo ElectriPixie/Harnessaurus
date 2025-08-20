@@ -1,13 +1,41 @@
 # data_structures.py
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+from typing import Literal
+
+OutputType = Literal["single", "multi"]
+
+@dataclass
+class PromptSet:
+    """Wrapper for a collection of Prompt objects (variable-length 'list')."""
+    prompts: List[Prompt] = field(default_factory=list)
+    output_type: OutputType = "multi"  # defaults to multi since it's a set
+    tags: dict = field(default_factory=dict)  # optional structured metadata for the set
+
+    def add_prompt(self, prompt: Prompt) -> None:
+        """Append a single Prompt to the set."""
+        self.prompts.append(prompt)
+
+    def extend_prompts(self, prompt_list: List[Prompt]) -> None:
+        """Add multiple Prompts to the set."""
+        self.prompts.extend(prompt_list)
+
+    def __len__(self):
+        return len(self.prompts)
+
+    def __iter__(self):
+        return iter(self.prompts)
+
+    def __getitem__(self, index):
+        return self.prompts[index]
 
 @dataclass
 class Prompt:
     """Minimal prompt representation."""
     prompt_list: List[str]                  # e.g., ["original", "probe"]
     has_context: bool = False               # True if multiple context prompts
-    tags: List[str] = field(default_factory=list)  # human-readable labels
+    output_type: OutputType = "single"  # restrict to "single" or "multi"
+    tags: Dict[str, any] = field(default_factory=dict)  # structured metadata
     plugin_meta: dict = field(default_factory=dict)  # metadata per plugin
 
 
@@ -26,6 +54,7 @@ class RunPrompt:
     rerun_clean_prompt: bool = False
     run_dir: Optional[str] = None
     last_mutator_name: Optional[str] = None
+    user_generator: Optional[str] = None
 
 
 @dataclass

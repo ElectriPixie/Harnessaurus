@@ -2,10 +2,10 @@
 import random
 from plugin_base import PluginBase
 from data_structures import Prompt, Output
+from data_structures import OutputType
 
 class RationalizationGenerator(PluginBase):
     """Generates prompt mutations to elicit internal reasoning, hidden constraints, or safety logic."""
-
     PROBES = {
         "direct": [
             {
@@ -48,36 +48,45 @@ class RationalizationGenerator(PluginBase):
             return self.all_probes[mutation_index - 1]
         return random.choice(self.all_probes)
 
-    def process_prompt(self, prompt_obj: Prompt, mutation_index: int = 0, with_context: bool = False) -> Prompt:
+    def process_prompt(
+        self,
+        prompt_obj: Prompt,
+        mutation_index: int = 0,
+        with_context: bool = True,
+        full_set: bool = True
+    ) -> Prompt | PromptSet:
         """
-        Return a mutated Prompt object. If `with_context` is True, returns multiple prompt_list entries.
-
-        Args:
-            prompt_obj: Original Prompt object
-            mutation_index: Optional index to pick specific probe
-            with_context: If True, include probe as additional context
-
-        Returns:
-            Prompt: mutated Prompt object
+        Return a mutated Prompt or PromptSet depending on `full_set`.
+        Handles context chains and tagging.
         """
+        if full_set:
+            # multiple probes → return a PromptSet
+            result_set = PromptSet(output_type="multi")
+            for probe in self.all_probes:
+                # build the context chain
+                if with_context:
+                    prompt_list = [probe["text"]] + prompt_obj.prompt_list if probe.get("order") == "before" else prompt_obj.prompt_list + [probe["text"]]
+                else:
+                    prompt_list = [f"{probe['text']} {prompt_obj.prompt_list[0]}" if probe.get("order") == "before"
+                                else f"{prompt_obj.prompt_list[0]} {probe['text']}"]
+
+                result_set.add_prompt(Prompt(
+                    prompt_list=prompt_list,
+                    has_context=with_context,
+                    tags={**prompt_obj.tags, "rationalization": True}
+                ))
+            return result_set
+
+        # fallback: single probe
         probe = self._select_probe(mutation_index)
         if with_context:
-            # Return Prompt with original + probe
-            if probe.get("order") == "before":
-                prompt_list = [probe["text"]] + prompt_obj.prompt_list
-            else:
-                prompt_list = prompt_obj.prompt_list + [probe["text"]]
-            return Prompt(prompt_list=prompt_list, has_context=True, tags=prompt_obj.tags + ["rationalization"])
+            prompt_list = [probe["text"]] + prompt_obj.prompt_list if probe.get("order") == "before" else prompt_obj.prompt_list + [probe["text"]]
         else:
-            # Merge probe text into single prompt string
-            if probe.get("order") == "before":
-                prompt_text = f"{probe['text']} {prompt_obj.prompt_list[0]}"
-            else:
-                prompt_text = f"{prompt_obj.prompt_list[0]} {probe['text']}"
-            return Prompt(prompt_list=[prompt_text], has_context=False, tags=prompt_obj.tags + ["rationalization"])
+            prompt_list = [f"{probe['text']} {prompt_obj.prompt_list[0]}" if probe.get("order") == "before"
+                        else f"{prompt_obj.prompt_list[0]} {probe['text']}"]
 
-    def process_prompt_set(self, prompt_set: list[Prompt], mutation_index: int = 0, with_context: bool = False) -> list[Prompt]:
-        """
-        Apply process_prompt to a list of Prompt objects.
-        """
-        return [self.process_prompt(p, mutation_index=mutation_index, with_context=with_context) for p in prompt_set]
+        return Prompt(
+            prompt_list=prompt_list,
+            has_context=with_context,
+            tags={**prompt_obj.tags, "rationalization": True}
+        )
