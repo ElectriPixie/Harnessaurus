@@ -142,12 +142,34 @@ class PluginManager:
         self.channel_map = channel_map or {}
 
     # --- Mutator interface ---
-    def process_prompt(self, prompt: Prompt) -> Prompt:
+    def process_prompt(self, prompt: Prompt, plugins_to_apply: Optional[list] = None) -> Prompt:
         """
-        Apply all mutators to a Prompt or PromptSet.
-        Returns a PromptSet with the resulting prompts.
+        Apply all active mutators to a Prompt or PromptSet.
+
+        Args:
+            prompt: Prompt or PromptSet object to mutate.
+            plugins_to_apply:
+                - None: use all loaded mutators
+                - empty list: apply no mutators
+                - non-empty list of mutator instances or names: apply only these
+
+        Returns:
+            Prompt or PromptSet after applying all mutators.
         """
-        for mutator in self.mutators:
+        # Determine active mutators
+        if plugins_to_apply is None:
+            active_plugins = self.mutators
+        elif all(isinstance(p, str) for p in plugins_to_apply):
+            name_to_plugin = {p.__class__.__name__: p for p in self.mutators}
+            active_plugins = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
+            missing = [name for name in plugins_to_apply if name not in name_to_plugin]
+            if missing:
+                print(f"[WARNING] These mutator names were not found: {missing}")
+        else:
+            active_plugins = plugins_to_apply  # assume instances
+
+        # Apply each active mutator in order
+        for mutator in active_plugins:
             prompt = mutator.process_prompt_set(prompt)
 
         return prompt
