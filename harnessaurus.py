@@ -228,7 +228,7 @@ def main():
 
             # Preview text for logging
             text_preview = ", ".join([p["text"] for p in prompt_list])
-            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{len(processor.prompts)} {BLUE}Prompt: {GREEN}{text_preview}{RESET}")
+            print(f"{BOLD}{BLUE}[{GREEN}Processing{BLUE}] {YELLOW}{i}/{int(len(processor.prompts)/processor.diviser)} {BLUE}Prompt: {GREEN}{text_preview}{RESET}")
 
             chunk_records: list[Record] = []
 
