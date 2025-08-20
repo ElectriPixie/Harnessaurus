@@ -179,7 +179,7 @@ def _process_outputs(
     return a list of Record objects with all analysis included.
     """
     results: List[Record] = []
-    iterator = 4 if prompt_obj.has_context else run_prompt.iterator
+    iterator = 4 if getattr(prompt_obj, "has_context", False) else run_prompt.iterator
     os.makedirs(run_prompt.run_dir, exist_ok=True)
 
     # --- Run clean output first ---
@@ -202,53 +202,39 @@ def _process_outputs(
         else:
             raise TypeError(f"Unexpected detector type: {type(p)}")
 
-    # --- Run clean output detectors ---
+    # --- Run detectors on clean output ---
     for name in detector_names:
         clean_output = pm.process_output(prompt_obj, clean_output, name)
 
     max_mutations = getattr(run_prompt, "max_mutations", 1)
-    
-    # Include clean output as mutation_index 0, then run mutations
+
     for mutation_index in range(max_mutations + 1):
-        if mutation_index == 0:
-            current_prompt = prompt_obj
-            current_output = clean_output
-        else:
-            # Apply mutators to prompt
-            current_prompt = pm.process_prompt(prompt_obj, plugins_to_apply=getattr(run_prompt, "mutators", None))
-            
-            # Optionally rerun clean prompt for each mutation
-            if getattr(run_prompt, "rerun_clean_prompt", False):
-                current_output = run_model_inference(
-                    model,
-                    prompt_obj,
-                    iterator,
-                    run_prompt.max_tokens_per_chunk,
-                    run_prompt.max_iterations,
-                    run_prompt.flip_negate
-                )
-                for name in detector_names:
-                    current_output = pm.process_output(prompt_obj, current_output, name)
-            else:
-                current_output = run_model_inference(
-                    model,
-                    current_prompt,
-                    iterator,
-                    run_prompt.max_tokens_per_chunk,
-                    run_prompt.max_iterations,
-                    run_prompt.flip_negate
-                )
-            
-            # Apply detectors to mutated output
-            for name in detector_names:
-                current_output = pm.process_output(current_prompt, current_output, name)
+        # Apply mutators to prompt
+        mutated_prompt = pm.process_prompt(
+            prompt_obj,
+            plugins_to_apply=getattr(run_prompt, "mutators", None)
+        )
+
+        # Run mutated prompt through model
+        mutated_output = run_model_inference(
+            model,
+            mutated_prompt,
+            iterator,
+            run_prompt.max_tokens_per_chunk,
+            run_prompt.max_iterations,
+            run_prompt.flip_negate
+        )
+
+        # Apply detectors to mutated output
+        for name in detector_names:
+            mutated_output = pm.process_output(mutated_prompt, mutated_output, name)
 
         # Store record
         record = Record(
             original_prompt="\n".join(prompt_obj.prompt_list),
-            mutated_prompt="\n".join(current_prompt.prompt_list) if mutation_index > 0 else None,
+            mutated_prompt="\n".join(mutated_prompt.prompt_list) if mutation_index > 0 else None,
             clean_output=clean_output,
-            mutated_output=current_output if mutation_index > 0 else None,
+            mutated_output=mutated_output if mutation_index > 0 else None,
             mutation_iteration=mutation_index,
             run_dir=run_prompt.run_dir
         )
@@ -257,11 +243,12 @@ def _process_outputs(
         pm.process_log(record)
         results.append(record)
 
-        # Stop mutation loop if refusal detector triggered
-        refusal = current_output.analysis.get("RefusalDetector", {})
-        if refusal.get("status") == "refused":
-            print("[INFO] Refusal detected by RefusalDetector, stopping mutation loop")
-            break
+        # Only stop early if loop=False and RefusalDetector accepted
+        if not getattr(run_prompt, "loop", True):
+            refusal = mutated_output.analysis.get("RefusalDetector", {})
+            if refusal.get("status") == "accepted":
+                print(f"[INFO] RefusalDetector accepted at mutation {mutation_index}, stopping early")
+                break
 
     return results
 
@@ -301,5 +288,3 @@ def run_prompt_test(
         results.extend(_process_outputs(prompt_item, run_prompt, model, aggregator, pm))
 
     return results
-
-
