@@ -1,7 +1,7 @@
-# plugins/hidden_prompt_injection_detector.py
-from plugin_base import PluginBase, DetectorPlugin
+from plugin_base import DetectorPlugin
 from pathlib import Path
 from typing import List, Dict, Optional
+from data_structures import Prompt, Output
 
 DEFAULT_CONTROL_CHARS = [
     '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
@@ -17,13 +17,8 @@ class HiddenPromptInjectionDetector(DetectorPlugin):
         control_chars_file: Optional[str] = None,
         homoglyph_file: Optional[str] = None
     ):
-        # Load zero-width chars
         self.zero_width_chars = DEFAULT_ZERO_WIDTH_CHARS
-
-        # Load control chars with fallback
         self.control_chars = self.load_control_chars(control_chars_file) or DEFAULT_CONTROL_CHARS
-
-        # Load homoglyphs with fallback to empty dict
         try:
             self.homoglyphs = self.load_homoglyphs(homoglyph_file) if homoglyph_file else {}
         except FileNotFoundError:
@@ -75,15 +70,23 @@ class HiddenPromptInjectionDetector(DetectorPlugin):
         homoglyph_set = {g for glyphs in self.homoglyphs.values() for g in glyphs}
         return [ch for ch in text if ch in homoglyph_set]
 
-    def process_output(self, prompt: str, output: str) -> Dict:
-        zero_width = self.find_zero_width(output)
-        control_chars = self.find_control_chars(output)
-        homoglyphs = self.find_homoglyphs(output)
+    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+        text = getattr(output_obj, "raw_output", "")
+        text = str(text)
+
+        zero_width = self.find_zero_width(text)
+        control_chars = self.find_control_chars(text)
+        homoglyphs = self.find_homoglyphs(text)
         flagged = bool(zero_width or control_chars or homoglyphs)
 
-        return {
+        if output_obj.analysis is None:
+            output_obj.analysis = {}
+
+        output_obj.analysis[self.__class__.__name__] = {
             "flagged": flagged,
             "zero_width_found": zero_width,
             "control_chars_found": control_chars,
             "homoglyphs_found": homoglyphs,
         }
+
+        return output_obj

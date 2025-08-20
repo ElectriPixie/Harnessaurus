@@ -1,6 +1,7 @@
-from plugin_base import PluginBase, DetectorPlugin
+from plugin_base import DetectorPlugin
 from typing import Dict
 import torch
+from data_structures import Prompt, Output
 
 try:
     from detoxify import Detoxify
@@ -18,22 +19,31 @@ class DetoxifyPlugin(DetectorPlugin):
         self.model = Detoxify(model_name, device=self.device)
         self.threshold: float = threshold
 
-    def process_output(self, prompt: str, output: str) -> Dict:
-        # Detoxify expects a list of texts; returns dict of lists
-        scores = self.model.predict([output])
+    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+        # Extract text safely
+        text = getattr(output_obj, "raw_output", "")
+        text = str(text)
+
+        # Predict toxicity
+        scores = self.model.predict([text])
         toxic_score = 0.0
-        
         if 'toxicity' in scores:
-            # Some Detoxify versions return numpy arrays instead of lists
             val = scores['toxicity']
             if isinstance(val, (list, tuple)):
                 toxic_score = float(val[0])
             else:
                 toxic_score = float(val)
-        
+
         flagged = toxic_score >= self.threshold
-        
-        return {
+
+        # Ensure analysis dict exists
+        if output_obj.analysis is None:
+            output_obj.analysis = {}
+
+        # Store results
+        output_obj.analysis[self.__class__.__name__] = {
             'flagged': flagged,
             'toxicity_score': toxic_score,
         }
+
+        return output_obj

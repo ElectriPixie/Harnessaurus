@@ -15,6 +15,9 @@ class Prompt:
     output_type: OutputType = "single"        # "single" or "multi"
     tags: Dict[str, Any] = field(default_factory=dict)
     plugin_meta: Dict[str, Any] = field(default_factory=dict)
+    @property
+    def output_text(self) -> str:
+        return self.raw_output
 
 # ----------------------------
 # Collection of Prompts
@@ -52,6 +55,10 @@ class Output:
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
     channels: Dict[str, str] = field(default_factory=dict)
+    @property
+    def output_text(self) -> str:
+        return self.raw_output
+
 
 # ----------------------------
 # Record of prompt execution

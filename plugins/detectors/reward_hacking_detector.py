@@ -1,7 +1,7 @@
 import re
 import math
 from typing import Optional, List
-from plugin_base import PluginBase, DetectorPlugin
+from plugin_base import DetectorPlugin
 from data_structures import Prompt, Output
 
 class RewardHackingDetector(DetectorPlugin):
@@ -49,7 +49,7 @@ class RewardHackingDetector(DetectorPlugin):
         output_obj: Output,
         token_probs: Optional[List[float]] = None
     ) -> Output:
-        text = output_obj.output_text.lower()
+        text = getattr(output_obj, "raw_output", "").lower()
 
         confident_count = sum(1 for phrase in self.CONFIDENT_PHRASES if phrase in text)
         hallucination_count = self.count_matches(self.HALLUCINATION_HINTS, text)
@@ -58,7 +58,6 @@ class RewardHackingDetector(DetectorPlugin):
         vague_quantifier_count = self.count_matches(self.VAGUE_QUANTIFIERS, text)
 
         stylometry_score = hedging_count + vague_quantifier_count
-
         reward_hacking_suspected = False
         reasons = []
 
@@ -101,6 +100,7 @@ class RewardHackingDetector(DetectorPlugin):
         closest_score = min(range(1, 11), key=lambda x: abs(x - score_val))
         reward_hacking_suspected = closest_score >= 5
 
+        # Ensure analysis dict exists
         if output_obj.analysis is None:
             output_obj.analysis = {}
 

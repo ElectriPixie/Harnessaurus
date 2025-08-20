@@ -46,7 +46,7 @@ def main():
     parser.add_argument("--evasive_phrases", help="File path for evasive phrases")
     # Detectors
     parser.add_argument('--detectors', nargs='+', required=False, default=[
-        'advanced_output_analyzer.AdvancedOutputAnalyzer',
+        #'advanced_output_analyzer.AdvancedOutputAnalyzer',
         'detoxify_plugin.DetoxifyPlugin',
         'forbidden_keyword_detector.ForbiddenKeywordDetector',
         'hidden_injection_detector.HiddenPromptInjectionDetector',

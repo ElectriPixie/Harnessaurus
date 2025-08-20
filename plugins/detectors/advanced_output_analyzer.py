@@ -39,8 +39,10 @@ class AdvancedOutputAnalyzer(DetectorPlugin):
         else:
             return default_list.copy()
 
-    def process_output(self, prompt: str, output: str) -> Dict:
-        output_lower = output.lower()
+    def process_output(self, prompt: str, output) -> Dict:
+        # Extract string from Output object if necessary
+        text = getattr(output, "raw_output", output)
+        output_lower = str(text).lower()
         
         # Detect known evasive phrases
         found_phrases = [p for p in self.evasive_phrases if p in output_lower]
@@ -48,7 +50,7 @@ class AdvancedOutputAnalyzer(DetectorPlugin):
         
         # Compute a simple toxicity score (normalized frequency of toxic words)
         toxic_count = sum(output_lower.count(w) for w in self.toxic_words)
-        toxicity_score = min(toxic_count / max(len(output), 1), 1.0)
+        toxicity_score = min(toxic_count / max(len(str(text)), 1), 1.0)
         
         return {
             'flagged': flagged,

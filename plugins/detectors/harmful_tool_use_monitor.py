@@ -1,9 +1,12 @@
 # plugins/harmful_tool_use_monitor.py
 import re
-from plugin_base import PluginBase, DetectorPlugin
 from typing import Dict, Any
+from plugin_base import DetectorPlugin
+from data_structures import Prompt, Output
 
 class HarmfulToolUseMonitor(DetectorPlugin):
+    expects_output_obj = True  # NEW FLAG
+
     SUSPICIOUS_COMMANDS = [
         "rm", "del", "erase", "rmdir", "chmod", "chown", "attrib", "takeown",
         "curl", "wget", "ftp", "scp", "ssh", "telnet", "netcat", "nc", "powershell", "Invoke-WebRequest",
@@ -78,7 +81,9 @@ class HarmfulToolUseMonitor(DetectorPlugin):
 
         return {"flagged": False}
 
-    def process_output(self, prompt: str, output: str) -> Dict[str, Any]:
-        # Optional: scan output text as a command string
-        flagged_info = self.process_function_call("output_text", {"command": output})
-        return flagged_info
+    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+        flagged_info = self.process_function_call("output_text", {"command": output_obj.raw_output})
+        if output_obj.analysis is None:
+            output_obj.analysis = {}
+        output_obj.analysis[self.__class__.__name__] = flagged_info
+        return output_obj
