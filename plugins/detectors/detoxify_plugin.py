@@ -19,7 +19,7 @@ class DetoxifyPlugin(DetectorPlugin):
         self.model = Detoxify(model_name, device=self.device)
         self.threshold: float = threshold
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         # Extract text safely
         text = getattr(output_obj, "raw_output", "")
         text = str(text)

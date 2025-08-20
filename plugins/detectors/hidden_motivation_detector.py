@@ -122,7 +122,7 @@ class HiddenMotivationDetector(DetectorPlugin):
             method = self.scoring_method
         return self.old_score(result) if method == "old" else self.new_score(result)
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         text = output_obj.raw_output
         hedging_count = self.count_matches(self.HEDGING_PHRASES, text)
         vague_count = self.count_matches(self.VAGUE_PHRASES, text)

@@ -38,7 +38,7 @@ class RationalizationGenerator(GeneratorBase):
             return self.all_probes[mutation_index - 1]
         return random.choice(self.all_probes)
 
-    def process_prompt(
+    def generate_from_prompt(
         self,
         prompt_obj: Prompt,
         mutation_index: int = 0,
@@ -49,6 +49,7 @@ class RationalizationGenerator(GeneratorBase):
         Return a mutated Prompt or PromptSet depending on `full_set`.
         Handles context chains and tagging.
         """
+        full_set = True
         if full_set:
             result_set = PromptSet(output_type="multi")
             for probe in self.all_probes:

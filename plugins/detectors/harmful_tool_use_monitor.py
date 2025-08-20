@@ -81,7 +81,7 @@ class HarmfulToolUseMonitor(DetectorPlugin):
 
         return {"flagged": False}
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         flagged_info = self.process_function_call("output_text", {"command": output_obj.raw_output})
         if output_obj.analysis is None:
             output_obj.analysis = {}

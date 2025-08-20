@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 import os
 
 from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
-from data_structures import Prompt, RunPrompt, Output, Record
+from data_structures import Prompt, RunPrompt, Output, Record, PromptSet
 from result_aggregator import ResultAggregator
 
 DEBUG = True
@@ -115,7 +115,7 @@ class PluginManager:
 
     def process_prompt(
         self,
-        prompt: Prompt,
+        prompt_obj: Prompt,
         plugins_to_apply: Optional[list] = None,
     ) -> Prompt:
         """
@@ -129,7 +129,7 @@ class PluginManager:
                 - list[str]: resolve by class-name string
                 - list[MutatorPlugin]: use provided instances
         """
-        debug_print(f"[DEBUG] Original prompt: {prompt.prompt_list}")
+        debug_print(f"[DEBUG] Original prompt: {prompt_obj.prompt_list}")
         debug_print(f"[DEBUG] plugins_to_apply: {plugins_to_apply}")
 
         # Resolve active plugins
@@ -156,19 +156,19 @@ class PluginManager:
         # Apply each mutator in order
         for plugin in active_plugins:
             debug_print(f"[DEBUG] Applying plugin: {plugin.__class__.__name__}")
-            prompt = plugin.process_prompt(
-                prompt_obj=prompt,
+            prompt_obj = plugin.process_prompt(
+                prompt_obj=prompt_obj,
             )
-            debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}: {prompt.prompt_list}")
+            debug_print(f"[DEBUG] Prompt after {plugin.__class__.__name__}: {prompt_obj.prompt_list}")
 
-        debug_print(f"[DEBUG] Final mutated prompt: {prompt.prompt_list}")
-        return prompt
+        debug_print(f"[DEBUG] Final mutated prompt: {prompt_obj.prompt_list}")
+        return prompt_obj
 
 
     def process_output(
         self,
-        prompt: Prompt,
-        output: Output,
+        prompt_obj: Prompt,
+        output_obj: Output,
         plugins_to_apply: Optional[list] = None
     ) -> Output:
         """
@@ -184,28 +184,28 @@ class PluginManager:
                 - If list of plugin objects, uses them directly.
         """
         # Ensure output channels exist
-        if not output.channels:
-            output.channels = split_into_channels(output)
-            print(f"[DEBUG] Created output channels: {list(output.channels.keys())}")
+        if not output_obj.channels:
+            output_obj.channels = split_into_channels(output_obj)
+            debug_print(f"[DEBUG] Created output channels: {list(output_obj.channels.keys())}")
 
         # Determine which detectors to run
         if plugins_to_apply is None:
             active_detectors = []  # run nothing
-            print("[DEBUG] plugins_to_apply=None -> running no detectors")
+            debug_print("[DEBUG] plugins_to_apply=None -> running no detectors")
         elif isinstance(plugins_to_apply, list) and len(plugins_to_apply) == 0:
             active_detectors = self.detectors  # run all
-            print(f"[DEBUG] plugins_to_apply=[] -> running all detectors: {[d.__class__.__name__ for d in active_detectors]}")
+            debug_print(f"[DEBUG] plugins_to_apply=[] -> running all detectors: {[d.__class__.__name__ for d in active_detectors]}")
         elif all(isinstance(p, str) for p in plugins_to_apply):
             name_to_plugin = {p.__class__.__name__: p for p in self.detectors}
             active_detectors = [name_to_plugin[name] for name in plugins_to_apply if name in name_to_plugin]
-            print(f"[DEBUG] plugins_to_apply by name -> running: {[d.__class__.__name__ for d in active_detectors]}")
+            debug_print(f"[DEBUG] plugins_to_apply by name -> running: {[d.__class__.__name__ for d in active_detectors]}")
         else:
             active_detectors = plugins_to_apply
-            print(f"[DEBUG] plugins_to_apply as objects -> running: {[d.__class__.__name__ for d in active_detectors]}")
+            debug_print(f"[DEBUG] plugins_to_apply as objects -> running: {[d.__class__.__name__ for d in active_detectors]}")
 
         # Ensure analysis dict exists
-        if output.analysis is None:
-            output.analysis = {}
+        if output_obj.analysis is None:
+            output_obj.analysis = {}
 
         # Run each detector exactly once
         for detector in active_detectors:
@@ -214,22 +214,22 @@ class PluginManager:
 
             if channels_for_detector:
                 detector_input_text = "\n".join(
-                    output.channels.get(ch, "") for ch in channels_for_detector
+                    output_obj.channels.get(ch, "") for ch in channels_for_detector
                 )
-                print(f"[DEBUG] Running {detector_name} on channels: {channels_for_detector}")
+                debug_print(f"[DEBUG] Running {detector_name} on channels: {channels_for_detector}")
             else:
-                detector_input_text = output.raw_output
-                print(f"[DEBUG] Running {detector_name} on raw_output")
+                detector_input_text = output_obj.raw_output
+                debug_print(f"[DEBUG] Running {detector_name} on raw_output")
 
-            detector_input_obj = Output(prompt=prompt, raw_output=detector_input_text)
+            detector_input_obj = Output(prompt=prompt_obj, raw_output=detector_input_text)
 
             # Run detector
-            analysis_result_obj = detector.process_output(prompt, detector_input_obj)
-            output.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
+            analysis_result_obj = detector.process_output(prompt_obj=prompt_obj, output_obj=detector_input_obj)
+            output_obj.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
 
-            print(f"[DEBUG] {detector_name} analysis result: {output.analysis[detector_name]}")
+            debug_print(f"[DEBUG] {detector_name} analysis result: {output_obj.analysis[detector_name]}")
 
-        return output
+        return output_obj
 
     def process_log(self, record: Record):
         for logger in self.loggers:
@@ -263,7 +263,6 @@ def _process_outputs(
     os.makedirs(run_prompt.run_dir, exist_ok=True)
 
     # --- Run clean output first ---
-    print("get clean output")
     clean_output = run_model_inference(
         model,
         prompt_obj,
@@ -274,10 +273,9 @@ def _process_outputs(
     )
 
     # Run all detectors on clean output
-    print("run detectors")
     clean_output = pm.process_output(
-        prompt=prompt_obj,
-        output=clean_output,
+        prompt_obj=prompt_obj,
+        output_obj=clean_output,
         plugins_to_apply=getattr(run_prompt, "use_detectors", [])
     )
 
@@ -297,13 +295,12 @@ def _process_outputs(
         results.append(record)
         return results
     else:
-        print("start mutating")
         max_mutations = getattr(run_prompt, "max_mutations", 1)
 
         for mutation_index in range(1, max_mutations + 1):
             # Apply all mutators sequentially
             mutated_prompt = pm.process_prompt(
-                prompt=prompt_obj,
+                prompt_obj=prompt_obj,
                 plugins_to_apply=getattr(run_prompt, "use_mutators", [])
             )
 
@@ -319,8 +316,8 @@ def _process_outputs(
 
             # --- Run detectors only once on the fully mutated output ---
             mutated_output = pm.process_output(
-                prompt=mutated_prompt, 
-                output=mutated_infer_output,
+                prompt_obj=mutated_prompt, 
+                output_obj=mutated_infer_output,
                 plugins_to_apply=getattr(run_prompt, "use_detectors", [])
             )
 
@@ -370,11 +367,35 @@ def run_prompt_test(
     if generator is None:
         raise ValueError(f"Generator '{run_prompt.use_generator}' not found")
 
-    # Generate a Prompt object
-    generated_prompt = generator.generate_from_prompt(run_prompt.prompt_obj)
+    # Generate a Prompt object or PromptSet
+    generated = generator.generate_from_prompt(run_prompt.prompt_obj)
 
-    # Wrap in a list so _process_outputs works the same way
-    prompts_to_run = [generated_prompt]
+    # Debug printing
+    debug_print(f"[DEBUG] Generator: {generator.__class__.__name__}")
+    debug_print(f"[DEBUG] Generated type: {type(generated).__name__}")
+    
+    if isinstance(generated, Prompt):
+        debug_print(f"[DEBUG] Generated Prompt contents: {generated.prompt_list}")
+    elif isinstance(generated, PromptSet):
+        debug_print(f"[DEBUG] Generated PromptSet contains {len(generated)} prompts")
+        debug_print(f"[DEBUG] First few prompts: {[p.prompt_list for p in generated[:5]]}")
+    elif isinstance(generated, list) and all(isinstance(p, Prompt) for p in generated):
+        debug_print(f"[DEBUG] Generated list of Prompts with {len(generated)} items")
+        debug_print(f"[DEBUG] First few prompts: {[p.prompt_list for p in generated[:5]]}")
+    else:
+        debug_print(f"[DEBUG] Unexpected type generated: {type(generated)}")
+
+    # Normalize to a flat list of Prompt objects
+    if isinstance(generated, Prompt):
+        prompts_to_run = [generated]
+    elif isinstance(generated, PromptSet):
+        prompts_to_run = list(generated)
+    elif isinstance(generated, list) and all(isinstance(p, Prompt) for p in generated):
+        prompts_to_run = generated
+    else:
+        raise TypeError(
+            f"Generator '{generator.__class__.__name__}' returned unexpected type: {type(generated)}"
+        )
 
     results = []
     for prompt_item in prompts_to_run:

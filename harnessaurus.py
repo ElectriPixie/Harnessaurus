@@ -92,7 +92,6 @@ def main():
     parser.add_argument("--use_mutators", nargs="+", required=False, default=[])
     parser.add_argument("--flip_negate", action="store_true", default=False)
     parser.add_argument("--skip_lines", type=int, default=0)
-    parser.add_argument("--last_mutator", default=None)
     parser.add_argument("--single_pass", action="store_true")
     parser.add_argument("--iterative", action="store_true")
     parser.add_argument("--iterative_exploit", action="store_true")

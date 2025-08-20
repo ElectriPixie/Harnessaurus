@@ -31,7 +31,7 @@ class ForbiddenKeywordDetector(DetectorPlugin):
                 keywords.add(line.lower())
         return keywords if keywords else set(self.DEFAULT_KEYWORDS)
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         text = getattr(output_obj, "raw_output", "")
         text_lower = str(text).lower()
 

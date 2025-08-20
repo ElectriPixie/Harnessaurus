@@ -52,7 +52,7 @@ class DataExfiltrationDetector(DetectorPlugin):
                 suspicious_substrings.append((w, entropy))
         return suspicious_substrings
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         text = output_obj.raw_output
 
         findings: Dict[str, Any] = {

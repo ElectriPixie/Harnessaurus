@@ -55,7 +55,7 @@ class DeceptionDetector(DetectorPlugin):
     def count_matches(self, patterns: List[str], text: str) -> int:
         return sum(1 for pat in patterns if re.search(pat, text, re.IGNORECASE))
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         # Ensure output_obj is an Output instance
         text = output_obj.raw_output.lower()
 

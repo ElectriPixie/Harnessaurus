@@ -70,7 +70,7 @@ class HiddenPromptInjectionDetector(DetectorPlugin):
         homoglyph_set = {g for glyphs in self.homoglyphs.values() for g in glyphs}
         return [ch for ch in text if ch in homoglyph_set]
 
-    def process_output(self, prompt: Prompt, output_obj: Output) -> Output:
+    def process_output(self, prompt_obj: Prompt, output_obj: Output) -> Output:
         text = getattr(output_obj, "raw_output", "")
         text = str(text)
 
