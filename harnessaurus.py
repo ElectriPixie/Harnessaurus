@@ -183,7 +183,7 @@ def main():
 
     all_records: list[Record] = []
 
-    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output", "mutation_iteration", "run_dir"]
+    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output", "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir", ]
     crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output", "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
 
     with open(full_csv_path, "w", newline="", encoding="utf-8") as f_csv, \
