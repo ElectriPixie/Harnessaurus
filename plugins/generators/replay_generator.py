@@ -1,6 +1,9 @@
 from typing import Union
 from plugin_base import GeneratorBase
 from data_structures import Prompt, PromptSet, Record, OutputType
+from typing import List
+from runner_utils import run_model_inference
+
 
 class ReplayGenerator(GeneratorBase):
     """
@@ -20,13 +23,13 @@ class ReplayGenerator(GeneratorBase):
         model: "GPTModel",
         aggregator: "ResultAggregator",
         pm: "PluginManager",
-    ) -> list[Record]:
+    ) -> List[Record]:
         """
         Process a Prompt where prompt_list contains a clean prompt and a mutated prompt.
         Runs inference for both, applies detectors, and builds a Record.
         """
 
-        results: list[Record] = []
+        results: List[Record] = []
 
         # Extract clean and mutated text from prompt_list
         clean_text = None
@@ -48,10 +51,10 @@ class ReplayGenerator(GeneratorBase):
 
         # --- Run clean output ---
         clean_output: Output = run_model_inference(
-            model,
-            clean_prompt,
-            iterator=None,  # not needed
-            max_tokens_per_chunk=run_prompt.max_tokens_per_chunk,
+            model=model,
+            prompt_obj=clean_prompt,
+            iterator=run_prompt.iterator,  # not needed
+            max_chunk_tokens=run_prompt.max_tokens_per_chunk,
             max_iterations=run_prompt.max_iterations,
             flip_negate=run_prompt.flip_negate
         )
@@ -64,10 +67,10 @@ class ReplayGenerator(GeneratorBase):
 
         # --- Run mutated output ---
         mutated_infer_output: Output = run_model_inference(
-            model,
-            mutated_prompt,
-            iterator=None,  # not needed
-            max_tokens_per_chunk=run_prompt.max_tokens_per_chunk,
+            model=model,
+            prompt_obj=mutated_prompt,
+            iterator=run_prompt.iterator,  # not needed
+            max_chunk_tokens=run_prompt.max_tokens_per_chunk,
             max_iterations=run_prompt.max_iterations,
             flip_negate=run_prompt.flip_negate
         )
@@ -100,25 +103,39 @@ class ReplayGenerator(GeneratorBase):
         mutation_index: int = 0,
         with_context: bool = True,
         full_set: bool = True
-    ) -> Union[Prompt, PromptSet]:
-
+    ) -> PromptSet:
         if not isinstance(prompt_obj, Prompt):
             raise TypeError("ReplayGenerator expects a Prompt object")
 
+        # Just wrap in PromptSet and forward as-is
         prompt_set = PromptSet(output_type="multi")
-
-        for base_text in prompt_obj.prompt_list:
-            # Apply mutation if enabled
-            mutated_text = self.mutate_prompt(base_text) if self.use_mutators else base_text
-
-            prompt_set.add_prompt(Prompt(
-                prompt_list=[mutated_text],
-                has_context=with_context,
-                tags={**prompt_obj.tags, "replay": True}
-            ))
-
+        prompt_set.add_prompt(prompt_obj)
         return prompt_set
 
     def mutate_prompt(self, text: str) -> str:
         # Example mutation; replace this with your actual mutator logic
         return text + " [mutated]"
+
+    def run_generated(
+        self,
+        generated: Union[Prompt, PromptSet],
+        run_prompt: "RunPrompt",
+        model: "GPTModel",
+        aggregator: "ResultAggregator",
+        pm: "PluginManager"
+    ) -> List["Record"]:
+        """Run the generated Prompt or PromptSet through the process_outputs hook."""
+        # Normalize to flat list of Prompts
+        if isinstance(generated, Prompt):
+            prompts = [generated]
+        elif isinstance(generated, PromptSet):
+            prompts = list(generated)
+        elif isinstance(generated, list) and all(isinstance(p, Prompt) for p in generated):
+            prompts = generated
+        else:
+            raise TypeError(f"Unexpected type returned by generator: {type(generated)}")
+
+        all_records = []
+        for prompt_item in prompts:
+            all_records.extend(self._process_outputs(prompt_item, run_prompt, model, aggregator, pm))
+        return all_records

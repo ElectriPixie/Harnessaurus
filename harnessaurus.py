@@ -100,6 +100,7 @@ def main():
         'zero_width_injector.ZeroWidthInjector',
     ])
     parser.add_argument('--generators', nargs='+', required=False, default=[
+        'replay_generator.ReplayGenerator',
         'rationalization_generator.RationalizationGenerator',
         'prompt_generator.PromptGenerator',
     ])
@@ -219,8 +220,7 @@ def main():
         crit_writer = csv.DictWriter(crit_csv, fieldnames=crit_csv_fields)
         crit_writer.writeheader()
 
-        processor = BasePromptProcessor(args.prompts)
-
+        processor = make_processor(args.processor, args.prompts)
 
         for i, prompt_list in enumerate(processor(), 1):
             if args.skip_lines and i < args.skip_lines:

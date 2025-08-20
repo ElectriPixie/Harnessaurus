@@ -3,7 +3,7 @@ from data_structures import Prompt, Output, Record
 
 def run_model_inference(
     model,
-    prompt,
+    prompt_obj,
     iterator=1,
     max_chunk_tokens=256,
     max_iterations=8,
@@ -24,24 +24,24 @@ def run_model_inference(
         The model Output
     """
     if iterator == 1:
-        return model.infer_single_pass(prompt=prompt)
+        return model.infer_single_pass(prompt=prompt_obj)
     elif iterator == 2:
         return model.infer_iterative(
-            prompt=prompt,
+            prompt=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
             flip_negate_flag=flip_negate
         )
     elif iterator == 3:
         return model.infer_iterative_exploit(
-            prompt=prompt,
+            prompt=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
             flip_negate_flag=flip_negate
         )
     elif iterator == 4:
         outputs = model.infer_iterative_with_prompt_list(
-            prompts=prompt,
+            prompts=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
             flip_negate_flag=flip_negate
