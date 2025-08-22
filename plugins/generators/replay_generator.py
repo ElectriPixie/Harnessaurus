@@ -56,7 +56,8 @@ class ReplayGenerator(GeneratorBase):
             iterator=run_prompt.iterator,
             max_chunk_tokens=run_prompt.max_tokens_per_chunk,
             max_iterations=run_prompt.max_iterations,
-            flip_negate=run_prompt.flip_negate
+            flip_negate=run_prompt.flip_negate,
+            legacy_mode=run_prompt.legacy_mode
         )
 
         clean_output = pm.process_output(
@@ -72,7 +73,8 @@ class ReplayGenerator(GeneratorBase):
             iterator=run_prompt.iterator,  # not needed
             max_chunk_tokens=run_prompt.max_tokens_per_chunk,
             max_iterations=run_prompt.max_iterations,
-            flip_negate=run_prompt.flip_negate
+            flip_negate=run_prompt.flip_negate,
+            legacy_mode=run_prompt.legacy_mode
         )
 
         mutated_output = pm.process_output(

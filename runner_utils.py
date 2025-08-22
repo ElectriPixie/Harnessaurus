@@ -8,7 +8,8 @@ def run_model_inference(
     iterator: int = 1,
     max_chunk_tokens: int = 256,
     max_iterations: int = 8,
-    flip_negate: bool = False
+    flip_negate: bool = False,
+    legacy_mode: bool = False,
 ) -> Output:
     """
     Dispatch prompt to the correct model method based on iterator.
@@ -17,14 +18,15 @@ def run_model_inference(
     """
     if iterator == 1:
         # Single-pass returns Output directly
-        return model.infer_single_pass(prompt=prompt_obj)
+        return model.infer_single_pass(prompt=prompt_obj, legacy_mode=legacy_mode)
     elif iterator == 2:
         # Iterative returns str -> wrap into Output
         text = model.infer_iterative(
             prompt=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
-            flip_negate_flag=flip_negate
+            flip_negate_flag=flip_negate,
+            legacy_mode=legacy_mode
         )
         return Output(prompt=prompt_obj, raw_output=text)
     elif iterator == 3:
@@ -32,7 +34,8 @@ def run_model_inference(
             prompt=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
-            flip_negate_flag=flip_negate
+            flip_negate_flag=flip_negate,
+            legacy_mode=legacy_mode
         )
         return Output(prompt=prompt_obj, raw_output=text)
     elif iterator == 4:
@@ -40,7 +43,8 @@ def run_model_inference(
             prompts=prompt_obj,
             max_chunk_tokens=max_chunk_tokens,
             max_iterations=max_iterations,
-            flip_negate_flag=flip_negate
+            flip_negate_flag=flip_negate,
+            legacy_mode=legacy_mode
         )
         return outputs[-1]  # Return last Output in list
     else:

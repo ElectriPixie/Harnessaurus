@@ -145,3 +145,5 @@ class RunPrompt:
     rerun_clean_prompt: bool = False
     run_dir: Optional[str] = None
     use_generator: Optional[str] = None
+    legacy_mode: bool = False  # <-- new flag
+

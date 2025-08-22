@@ -143,6 +143,12 @@ def main():
         default="base",
         help="Which prompt processor to use"
     )
+    parser.add_argument(
+        "--legacy_mode",
+        action="store_true",
+        default=True,  # default to on
+        help="Use legacy mode for channel extraction and output handling"
+    )
     args = parser.parse_args()
 
     # Determine iteration mode
@@ -284,6 +290,7 @@ def main():
                 generator_plugins=generators,
                 logger_plugins=loggers,
                 mutator_plugins=mutators,
+                legacy_mode=args.legacy_mode  # <-- set legacy_mode here
             )
 
             recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
