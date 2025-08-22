@@ -1,26 +1,79 @@
-# utils.py
 import re
+import json
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+
+DEBUG = False
 
 def debug_print(debug_flag, *args, **kwargs):
+    """Print debug messages if debug_flag is True."""
     if debug_flag:
         print(*args, **kwargs)
 
-def split_into_channels(output):
-    """Extract <|channel|>content<|message|> sections from Output object."""
-    if not hasattr(output, 'raw_output') or not output.raw_output:
-        return {}
-    pattern = re.compile(r"<\|channel\|>(\w+)<\|message\|>")
-    matches = list(pattern.finditer(output.raw_output))
+
+def extract_content_from_raw(raw_text: str) -> Dict[str, str]:
+    """
+    Extract channels from a legacy raw_output string.
+    Returns dict with 'final' key at minimum.
+    """
+    # Find all <|channel|>…<|message|> blocks
+    channel_match = re.findall(
+        r"<\|channel\|>(\w+)<\|message\|>(.*?)((?=<\|channel\|>)|$)", 
+        raw_text, 
+        re.DOTALL
+    )
+
+    if not channel_match:
+        # No channels detected, return raw text as final
+        return {"final": raw_text.strip()}
+
     channels = {}
-    for i, match in enumerate(matches):
-        channel_name = match.group(1)
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(output.raw_output)
-        channels[channel_name] = output.raw_output[start:end].strip()
+    for name, content, _ in channel_match:
+        # Strip control markers
+        cleaned = re.split(r"<\|end\|>|<\|start\|>|<\|return\|>", content)[0].strip()
+        channels[name] = cleaned
+
+    # Ensure 'final' exists
+    if "final" not in channels and channel_match:
+        # pick the last channel as final
+        channels["final"] = list(channels.values())[-1]
+
     return channels
 
+
+def split_into_channels(output_or_dict) -> Dict[str, str]:
+    """
+    Extract channels from either:
+        - a Harmony dict (modern)
+        - a legacy raw string or Output object
+    Returns dict: channel_name -> text
+    """
+    if isinstance(output_or_dict, dict):
+        # Modern Harmony dict
+        channels = {}
+        for channel in ["final", "analysis", "commentary"]:
+            channels[channel] = output_or_dict.get(channel, "")
+        # Include extra keys
+        for k, v in output_or_dict.items():
+            if k not in channels:
+                channels[k] = v
+        return channels
+
+    # Legacy path
+    raw_text = getattr(output_or_dict, "raw_output", None) if hasattr(output_or_dict, "raw_output") else str(output_or_dict)
+    if not raw_text:
+        return {"final": ""}
+
+    if isinstance(raw_text, dict):
+        return raw_text
+
+    return extract_content_from_raw(raw_text)
+
+
 def flip_negation(text: str) -> str:
-    """Flip common negations in text."""
+    """
+    Flip common negations in text (e.g., "don't" -> "do").
+    """
     patterns = [
         (r"\bdo not\b", "do"), (r"\bdon't\b", "do"),
         (r"\bcan not\b", "can"), (r"\bcan't\b", "can"),
@@ -29,6 +82,4 @@ def flip_negation(text: str) -> str:
     ]
     for pat, repl in patterns:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-    if DEBUG:
-        print(f"[flip_negation] Result: {text[:100]}...")
     return text

@@ -66,7 +66,8 @@ class PromptSet:
 @dataclass
 class Output:
     prompt: "Prompt"
-    raw_output: str
+    raw_output: str  # always contains the full legacy string
+    final: Optional[str] = None  # explicitly store the "final" content
     analysis: Dict[str, Any] = field(default_factory=dict)
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
@@ -74,7 +75,25 @@ class Output:
 
     @property
     def output_text(self) -> str:
+        """
+        For legacy detectors: return the raw string.
+        """
         return self.raw_output
+
+    def set_channels(self, channels_dict: Dict[str, str]):
+        """
+        Populate channels dictionary. Also optionally extracts 'final'.
+        """
+        self.channels = channels_dict
+        # Auto-fill final if present in channels and final not set
+        if not self.final and "final" in channels_dict:
+            self.final = channels_dict["final"]
+
+    def get_channel(self, name: str) -> str:
+        """
+        Safely retrieve a channel's text.
+        """
+        return self.channels.get(name, "")
 
 
 # ----------------------------

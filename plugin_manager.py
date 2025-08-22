@@ -3,6 +3,7 @@ from typing import List, Dict, Optional
 from plugin_base import PluginBase, MutatorPlugin, DetectorPlugin
 from data_structures import Prompt, Output, Record
 from utils import split_into_channels, debug_print
+import json
 
 DEBUG=False
 
@@ -64,9 +65,18 @@ class PluginManager:
         output_obj: Output,
         plugins_to_apply: Optional[List[str]] = None
     ) -> Output:
-        """Run detectors on the output object."""
+        """Run detectors on the output object, compatible with Harmony or legacy outputs."""
+
+        # Ensure channels exist
         if not output_obj.channels:
-            output_obj.channels = split_into_channels(output_obj)
+            output_obj.set_channels(split_into_channels(output_obj))
+
+        # --- Merge channels back into legacy-style raw string ---
+        # This preserves old behavior for detectors that expect a single string
+        legacy_raw_string = "\n".join(
+            str(text) for key, text in output_obj.channels.items()
+        )
+        output_obj.raw_output = legacy_raw_string  # always contains merged raw string
 
         # Resolve detectors
         if plugins_to_apply is None:
@@ -88,14 +98,19 @@ class PluginManager:
             channels_for_detector = self.channel_map.get(detector_name)
 
             if channels_for_detector:
+                # Join requested channels into string for detector
                 detector_input_text = "\n".join(
-                    output_obj.channels.get(ch, "") for ch in channels_for_detector
+                    str(output_obj.channels.get(ch, "")) for ch in channels_for_detector
                 )
             else:
+                # Legacy behavior: use merged raw string
                 detector_input_text = output_obj.raw_output
 
             detector_input_obj = Output(prompt=prompt_obj, raw_output=detector_input_text)
-            analysis_result_obj = detector.process_output(prompt_obj=prompt_obj, output_obj=detector_input_obj)
+            analysis_result_obj = detector.process_output(
+                prompt_obj=prompt_obj,
+                output_obj=detector_input_obj
+            )
             output_obj.analysis[detector_name] = analysis_result_obj.analysis.get(detector_name)
 
         return output_obj
