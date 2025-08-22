@@ -331,6 +331,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         "debug": debug_data
     }
 
+@app.get("/v1/version")
+async def version():
+    return {
+        "version": "0.1.1",
+        "model_id": "gpt-oss-20b",
+        "harmony_mode": "Prompt",
+        "deterministic": "Yes",
+    }
+
 # --- Run server ---
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=args.port)
