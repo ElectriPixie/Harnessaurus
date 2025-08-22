@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Log Viewer</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 1rem;
+        }
+
+        .record {
+            border: 1px solid #ccc;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background: #fff;
+        }
+
+        .collapsible {
+            cursor: pointer;
+            padding: 0.2rem;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-weight: bold;
+            background: #eee;
+            margin-top: 0.2rem;
+        }
+
+        .content {
+            display: none;
+            padding-left: 1rem;
+            border-left: 2px solid #ccc;
+            margin-bottom: 0.5rem;
+        }
+
+        .important {
+            color: darkgreen;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
+</head>
+
+<body>
+
+    <h1>Log Viewer</h1>
+    <input type="file" id="fileInput">
+    <div id="logContainer"></div>
+
+    <script>
+        function createField(name, value, important = false, expanded = false) {
+            const wrapper = document.createElement('div');
+
+            if (important) {
+                const label = document.createElement('div');
+                label.textContent = name + ":";
+                label.className = 'important';
+                wrapper.appendChild(label);
+
+                const pre = document.createElement('pre');
+                pre.textContent = value;
+                wrapper.appendChild(pre);
+
+            } else {
+                const btn = document.createElement('button');
+                btn.textContent = name;
+                btn.className = 'collapsible';
+
+                const content = document.createElement('div');
+                content.className = 'content';
+                if (expanded) content.style.display = 'block';
+                const pre = document.createElement('pre');
+                try {
+                    pre.textContent = JSON.stringify(value, null, 2);
+                } catch (e) {
+                    pre.textContent = String(value);
+                }
+                content.appendChild(pre);
+
+                btn.onclick = () => content.style.display = content.style.display === 'block' ? 'none' : 'block';
+
+                wrapper.appendChild(btn);
+                wrapper.appendChild(content);
+            }
+
+            return wrapper;
+        }
+
+        function renderLog(log) {
+            const recordDiv = document.createElement('div');
+            recordDiv.className = 'record';
+
+            // Prompts
+            ['original_prompt', 'mutated_prompt'].forEach(field => {
+                if (log[field]) recordDiv.appendChild(createField(field, log[field], true));
+            });
+
+            // Outputs (expanded by default)
+            ['clean_output', 'mutated_output'].forEach(field => {
+                if (log[field]) {
+                    let finalText = '';
+                    try {
+                        const channels = log[field].channels || {};
+                        finalText = channels.final || '';
+                    } catch (e) { }
+                    if (finalText) recordDiv.appendChild(createField(field + " (final)", finalText, true, true));
+                    recordDiv.appendChild(createField(field, log[field], false, true));
+                }
+            });
+
+            // Refusal status for clean and mutated
+            try {
+                const refusalClean = log.analysis_clean?.RefusalDetector?.status || 'unknown';
+                const refusalMutated = log.analysis_mutated?.RefusalDetector?.status || 'unknown';
+                recordDiv.appendChild(createField("Refusal Status (clean)", refusalClean, true));
+                recordDiv.appendChild(createField("Refusal Status (mutated)", refusalMutated, true));
+            } catch (e) { }
+
+            // Include analysis_clean and analysis_mutated in collapsible sections
+            if (log.analysis_clean) {
+                recordDiv.appendChild(createField("analysis_clean", log.analysis_clean));
+            }
+            if (log.analysis_mutated) {
+                recordDiv.appendChild(createField("analysis_mutated", log.analysis_mutated));
+            }
+
+            // Render any other top-level fields not already included
+            Object.keys(log).forEach(key => {
+                if (!['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'analysis_clean', 'analysis_mutated'].includes(key)) {
+                    recordDiv.appendChild(createField(key, log[key]));
+                }
+            });
+
+            document.getElementById('logContainer').appendChild(recordDiv);
+        }
+
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const text = await file.text();
+
+            // Split multiple JSON objects (one per line or separated by newlines)
+            const jsonObjects = text
+                .split(/\r?\n(?=\s*\{)/)
+                .map(line => line.trim())
+                .filter(line => line.length);
+
+            const parsedRecords = [];
+            for (const objText of jsonObjects) {
+                try {
+                    parsedRecords.push(JSON5.parse(objText));
+                } catch (err) {
+                    console.warn("Skipping invalid object:", err, objText);
+                }
+            }
+
+            const container = document.getElementById('logContainer');
+            container.innerHTML = '';
+
+            parsedRecords.forEach(record => renderLog(record));
+        });
+    </script>
+</body>
+
+</html>
