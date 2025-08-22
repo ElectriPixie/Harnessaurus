@@ -172,7 +172,7 @@ def main():
             "replace_prob": args.homoglyph_replace_prob,
         },
         "word_mutator.WordMutator": {
-            "replace_prob": args.word_replace_prob
+            "intensity": args.word_replace_prob
         }
     }
     logger_param_map = {}
