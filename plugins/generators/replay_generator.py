@@ -53,7 +53,7 @@ class ReplayGenerator(GeneratorBase):
         clean_output: Output = run_model_inference(
             model=model,
             prompt_obj=clean_prompt,
-            iterator=run_prompt.iterator,  # not needed
+            iterator=run_prompt.iterator,
             max_chunk_tokens=run_prompt.max_tokens_per_chunk,
             max_iterations=run_prompt.max_iterations,
             flip_negate=run_prompt.flip_negate

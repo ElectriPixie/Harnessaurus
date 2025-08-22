@@ -110,14 +110,16 @@ class Record:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "original_prompt": self.original_prompt,
-            "mutated_prompt": self.mutated_prompt,
+            "original_prompt": self.original_prompt if self.original_prompt else "",
+            "mutated_prompt": self.mutated_prompt if self.mutated_prompt else "",
             "clean_output": self.clean_output.raw_output if self.clean_output else "",
             "mutated_output": self.mutated_output.raw_output if self.mutated_output else "",
-            "mutation_iteration": self.mutation_iteration,
-            "run_dir": self.run_dir,
+            "clean_channels": self.clean_output.channels if self.clean_output else {},
+            "mutated_channels": self.mutated_output.channels if self.mutated_output else "",
             "analysis_clean": self.clean_output.analysis if self.clean_output else {},
             "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
+            "mutation_iteration": self.mutation_iteration,
+            "run_dir": self.run_dir,
         }
 
 

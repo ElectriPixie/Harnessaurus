@@ -218,10 +218,20 @@ def main():
 
     all_records: list[Record] = []
 
-    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
-                       "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir"]
-    crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
-                       "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
+    full_csv_fields = [
+        "original_prompt", "mutated_prompt",
+        "clean_output", "mutated_output",
+        "clean_channels", "mutated_channels",
+        "analysis_clean", "analysis_mutated",
+        "mutation_iteration", "run_dir"
+    ]
+    crit_csv_fields = [
+        "original_prompt", "mutated_prompt", 
+        "clean_output", "mutated_output",
+        "analysis_clean", "analysis_mutated",
+        "clean_channels", "mutated_channels",
+        "critical_analysis", "run_dir"
+    ]
 
     # ANSI colors
     RED = "\033[31m"

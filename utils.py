@@ -10,6 +10,15 @@ def debug_print(debug_flag, *args, **kwargs):
     if debug_flag:
         print(*args, **kwargs)
 
+def merge_channels_for_output(channels: dict) -> str:
+    """
+    Merge channels in a defined order for legacy detectors or clean_output.
+    Order: analysis -> commentary -> final
+    """
+    if not channels:
+        return ""
+    return "\n".join(str(channels[ch]) for ch in ["analysis", "commentary", "final"] if ch in channels)
+
 
 def extract_content_from_raw(raw_text: str) -> Dict[str, str]:
     """

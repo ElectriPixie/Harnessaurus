@@ -32,16 +32,15 @@
             text-align: left;
             outline: none;
             font-weight: bold;
-            background: #b388ff;
-            /* muted blue button */
-            color: #f8f8f2;
+            background: #2a2a2a;
+            color: #66d9ef;
             border-radius: 4px;
             margin-top: 0.3rem;
             transition: background 0.2s;
         }
 
         .collapsible:hover {
-            background: #d4bfff;
+            background: #3a3a3a;
         }
 
         .content {
@@ -68,39 +67,6 @@
             border-radius: 4px;
         }
 
-        .prompt-row {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-            margin-bottom: 0.3rem;
-        }
-
-        .prompt-label {
-            font-weight: bold;
-            color: #00ffff;
-            opacity: 0.8;
-        }
-
-        .prompt-text {
-            color: #8be9fd;
-            opacity: 1;
-        }
-
-        .refusal-accepted {
-            color: #50fa7b;
-            font-weight: bold;
-        }
-
-        .refusal-refused {
-            color: #ff5555;
-            font-weight: bold;
-        }
-
-        .refusal-unknown {
-            color: #f1fa8c;
-            font-weight: bold;
-        }
-
         input[type="file"] {
             margin-bottom: 1rem;
             background: #2a2a2a;
@@ -123,15 +89,6 @@
     <div id="logContainer"></div>
 
     <script>
-        function getRefusalSpan(status) {
-            const span = document.createElement('span');
-            span.textContent = status;
-            if (status === 'accepted') span.className = 'refusal-accepted';
-            else if (status === 'refused') span.className = 'refusal-refused';
-            else span.className = 'refusal-unknown';
-            return span;
-        }
-
         function createField(name, value, important = false, expanded = false) {
             const wrapper = document.createElement('div');
 
@@ -142,7 +99,7 @@
                 wrapper.appendChild(label);
 
                 const pre = document.createElement('pre');
-                pre.textContent = (typeof value === 'object') ? JSON.stringify(value, null, 2) : String(value);
+                pre.textContent = value;
                 wrapper.appendChild(pre);
 
             } else {
@@ -155,9 +112,7 @@
                 if (expanded) content.style.display = 'block';
                 const pre = document.createElement('pre');
                 try {
-                    // Pretty-print JSON only for objects
-                    if (typeof value === 'object') pre.textContent = JSON.stringify(value, null, 2);
-                    else pre.textContent = String(value);
+                    pre.textContent = JSON.stringify(value, null, 2);
                 } catch (e) {
                     pre.textContent = String(value);
                 }
@@ -176,33 +131,10 @@
             const recordDiv = document.createElement('div');
             recordDiv.className = 'record';
 
-            // Clean Prompt Row
-            const cleanRow = document.createElement('div');
-            cleanRow.className = 'prompt-row';
-            const cleanLabel = document.createElement('span');
-            cleanLabel.className = 'prompt-label';
-            cleanLabel.textContent = 'Clean Prompt:';
-            const cleanPrompt = document.createElement('span');
-            cleanPrompt.className = 'prompt-text';
-            cleanPrompt.textContent = log.original_prompt;
-            const cleanRefusal = getRefusalSpan(log.analysis_clean?.RefusalDetector?.status || 'unknown');
-            cleanRow.append(cleanLabel, cleanPrompt, cleanRefusal);
-            recordDiv.appendChild(cleanRow);
+            ['original_prompt', 'mutated_prompt'].forEach(field => {
+                if (log[field]) recordDiv.appendChild(createField(field, log[field], true));
+            });
 
-            // Mutated Prompt Row
-            const mutatedRow = document.createElement('div');
-            mutatedRow.className = 'prompt-row';
-            const mutatedLabel = document.createElement('span');
-            mutatedLabel.className = 'prompt-label';
-            mutatedLabel.textContent = 'Mutated Prompt:';
-            const mutatedPrompt = document.createElement('span');
-            mutatedPrompt.className = 'prompt-text';
-            mutatedPrompt.textContent = log.mutated_prompt || '';
-            const mutatedRefusal = getRefusalSpan(log.analysis_mutated?.RefusalDetector?.status || 'unknown');
-            mutatedRow.append(mutatedLabel, mutatedPrompt, mutatedRefusal);
-            recordDiv.appendChild(mutatedRow);
-
-            // Outputs
             ['clean_output', 'mutated_output'].forEach(field => {
                 if (log[field]) {
                     let finalText = '';
@@ -215,11 +147,16 @@
                 }
             });
 
-            // Analysis
+            try {
+                const refusalClean = log.analysis_clean?.RefusalDetector?.status || 'unknown';
+                const refusalMutated = log.analysis_mutated?.RefusalDetector?.status || 'unknown';
+                recordDiv.appendChild(createField("Refusal Status (clean)", refusalClean, true));
+                recordDiv.appendChild(createField("Refusal Status (mutated)", refusalMutated, true));
+            } catch (e) { }
+
             if (log.analysis_clean) recordDiv.appendChild(createField("analysis_clean", log.analysis_clean));
             if (log.analysis_mutated) recordDiv.appendChild(createField("analysis_mutated", log.analysis_mutated));
 
-            // Any other keys
             Object.keys(log).forEach(key => {
                 if (!['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'analysis_clean', 'analysis_mutated'].includes(key)) {
                     recordDiv.appendChild(createField(key, log[key]));
