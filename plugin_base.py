@@ -1,7 +1,7 @@
 from typing import List, Union, Callable
 from data_structures import Prompt, PromptSet, Record, Output, RunPrompt
 from runner_utils import run_model_inference
-
+import copy
 
 class PluginBase:
     """Minimal plugin functionality: shared hooks and metadata."""
@@ -106,7 +106,7 @@ class GeneratorBase(PluginBase):
         max_mutations = getattr(run_prompt, "max_mutations", 1)
         for mutation_index in range(1, max_mutations + 1):
             mutated_prompt = pm.process_prompt(
-                prompt_obj=prompt_obj,
+                prompt_obj=copy.deepcopy(prompt_obj),
                 plugins_to_apply=getattr(run_prompt, "use_mutators", [])
             )
 

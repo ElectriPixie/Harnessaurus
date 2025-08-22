@@ -122,6 +122,7 @@ def main():
     parser.add_argument("--iterative", action="store_true")
     parser.add_argument("--iterative_exploit", action="store_true")
     parser.add_argument("--homoglyph_replace_prob", type=float, default=1.0)
+    parser.add_argument("--word_replace_prob", type=float, default=1.0)
     parser.add_argument('--use_generator', type=str, default="PromptGenerator")
     parser.add_argument(
         "--processor",
@@ -170,6 +171,9 @@ def main():
             "datasets": [("homoglyph_set", "homoglyphs.txt")],
             "replace_prob": args.homoglyph_replace_prob,
         },
+        "word_mutator.WordMutator": {
+            "intensity": args.word_replace_prob
+        }
     }
     logger_param_map = {}
     generator_param_map = {}
