@@ -66,7 +66,8 @@ class PromptSet:
 @dataclass
 class Output:
     prompt: "Prompt"
-    raw_output: str
+    raw_output: str  # always contains the full legacy string
+    final: Optional[str] = None  # explicitly store the "final" content
     analysis: Dict[str, Any] = field(default_factory=dict)
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
@@ -74,7 +75,25 @@ class Output:
 
     @property
     def output_text(self) -> str:
+        """
+        For legacy detectors: return the raw string.
+        """
         return self.raw_output
+
+    def set_channels(self, channels_dict: Dict[str, str]):
+        """
+        Populate channels dictionary. Also optionally extracts 'final'.
+        """
+        self.channels = channels_dict
+        # Auto-fill final if present in channels and final not set
+        if not self.final and "final" in channels_dict:
+            self.final = channels_dict["final"]
+
+    def get_channel(self, name: str) -> str:
+        """
+        Safely retrieve a channel's text.
+        """
+        return self.channels.get(name, "")
 
 
 # ----------------------------
@@ -91,14 +110,16 @@ class Record:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "original_prompt": self.original_prompt,
-            "mutated_prompt": self.mutated_prompt,
+            "original_prompt": self.original_prompt if self.original_prompt else "",
+            "mutated_prompt": self.mutated_prompt if self.mutated_prompt else "",
             "clean_output": self.clean_output.raw_output if self.clean_output else "",
             "mutated_output": self.mutated_output.raw_output if self.mutated_output else "",
-            "mutation_iteration": self.mutation_iteration,
-            "run_dir": self.run_dir,
+            "clean_channels": self.clean_output.channels if self.clean_output else {},
+            "mutated_channels": self.mutated_output.channels if self.mutated_output else "",
             "analysis_clean": self.clean_output.analysis if self.clean_output else {},
             "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
+            "mutation_iteration": self.mutation_iteration,
+            "run_dir": self.run_dir,
         }
 
 
@@ -124,3 +145,5 @@ class RunPrompt:
     rerun_clean_prompt: bool = False
     run_dir: Optional[str] = None
     use_generator: Optional[str] = None
+    legacy_mode: bool = False  # <-- new flag
+

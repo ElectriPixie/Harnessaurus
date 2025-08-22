@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Log Viewer</title>
+    <style>
+        body {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #a0ffa0;
+            padding: 1rem;
+        }
+
+        h1 {
+            color: #66d9ef;
+            text-shadow: 0 0 5px #66d9ef33;
+        }
+
+        .record {
+            border: 1px solid #444;
+            margin-bottom: 1rem;
+            padding: 0.8rem;
+            background: #222;
+            border-radius: 6px;
+        }
+
+        .collapsible {
+            cursor: pointer;
+            padding: 0.3rem;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-weight: bold;
+            background: #2a2a2a;
+            color: #66d9ef;
+            border-radius: 4px;
+            margin-top: 0.3rem;
+            transition: background 0.2s;
+        }
+
+        .collapsible:hover {
+            background: #3a3a3a;
+        }
+
+        .content {
+            display: none;
+            padding-left: 1rem;
+            border-left: 2px solid #50fa7b;
+            margin-bottom: 0.5rem;
+            background: #1e1e1e;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .important {
+            color: #ff79c6;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: #f8f8f2;
+            background: #1e1e1e;
+            padding: 0.3rem;
+            border-radius: 4px;
+        }
+
+        input[type="file"] {
+            margin-bottom: 1rem;
+            background: #2a2a2a;
+            color: #a0ffa0;
+            border: 1px solid #50fa7b;
+            padding: 0.3rem;
+            border-radius: 4px;
+        }
+
+        ::selection {
+            background: #50fa7b33;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
+</head>
+
+<body>
+    <h1>Log Viewer</h1>
+    <input type="file" id="fileInput">
+    <div id="logContainer"></div>
+
+    <script>
+        function createField(name, value, important = false, expanded = false) {
+            const wrapper = document.createElement('div');
+
+            if (important) {
+                const label = document.createElement('div');
+                label.textContent = name + ":";
+                label.className = 'important';
+                wrapper.appendChild(label);
+
+                const pre = document.createElement('pre');
+                pre.textContent = value;
+                wrapper.appendChild(pre);
+
+            } else {
+                const btn = document.createElement('button');
+                btn.textContent = name;
+                btn.className = 'collapsible';
+
+                const content = document.createElement('div');
+                content.className = 'content';
+                if (expanded) content.style.display = 'block';
+                const pre = document.createElement('pre');
+                try {
+                    pre.textContent = JSON.stringify(value, null, 2);
+                } catch (e) {
+                    pre.textContent = String(value);
+                }
+                content.appendChild(pre);
+
+                btn.onclick = () => content.style.display = content.style.display === 'block' ? 'none' : 'block';
+
+                wrapper.appendChild(btn);
+                wrapper.appendChild(content);
+            }
+
+            return wrapper;
+        }
+
+        function renderLog(log) {
+            const recordDiv = document.createElement('div');
+            recordDiv.className = 'record';
+
+            ['original_prompt', 'mutated_prompt'].forEach(field => {
+                if (log[field]) recordDiv.appendChild(createField(field, log[field], true));
+            });
+
+            ['clean_output', 'mutated_output'].forEach(field => {
+                if (log[field]) {
+                    let finalText = '';
+                    try {
+                        const channels = log[field].channels || {};
+                        finalText = channels.final || '';
+                    } catch (e) { }
+                    if (finalText) recordDiv.appendChild(createField(field + " (final)", finalText, true, true));
+                    recordDiv.appendChild(createField(field, log[field], false, true));
+                }
+            });
+
+            try {
+                const refusalClean = log.analysis_clean?.RefusalDetector?.status || 'unknown';
+                const refusalMutated = log.analysis_mutated?.RefusalDetector?.status || 'unknown';
+                recordDiv.appendChild(createField("Refusal Status (clean)", refusalClean, true));
+                recordDiv.appendChild(createField("Refusal Status (mutated)", refusalMutated, true));
+            } catch (e) { }
+
+            if (log.analysis_clean) recordDiv.appendChild(createField("analysis_clean", log.analysis_clean));
+            if (log.analysis_mutated) recordDiv.appendChild(createField("analysis_mutated", log.analysis_mutated));
+
+            Object.keys(log).forEach(key => {
+                if (!['original_prompt', 'mutated_prompt', 'clean_output', 'mutated_output', 'analysis_clean', 'analysis_mutated'].includes(key)) {
+                    recordDiv.appendChild(createField(key, log[key]));
+                }
+            });
+
+            document.getElementById('logContainer').appendChild(recordDiv);
+        }
+
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const text = await file.text();
+
+            const jsonObjects = text
+                .split(/\r?\n(?=\s*\{)/)
+                .map(line => line.trim())
+                .filter(line => line.length);
+
+            const parsedRecords = [];
+            for (const objText of jsonObjects) {
+                try {
+                    parsedRecords.push(JSON5.parse(objText));
+                } catch (err) {
+                    console.warn("Skipping invalid object:", err, objText);
+                }
+            }
+
+            const container = document.getElementById('logContainer');
+            container.innerHTML = '';
+            parsedRecords.forEach(record => renderLog(record));
+        });
+    </script>
+</body>
+
+</html>

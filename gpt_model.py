@@ -2,27 +2,142 @@ import requests
 import traceback
 from typing import Union, List
 from data_structures import Prompt, Output
-from utils import flip_negation as original_flip_negation
-from utils import debug_print
+from utils import (
+    flip_negation as utils_flip_negation,
+    debug_print,
+)
 
-DEBUG = False
+DEBUG = True
+HARMONY_TOKEN_IDS = {200000, 200001, 200002, 200003, 200004, 200005, 200006, 200007}
 
-def flip_negation(text: str) -> str:
-    """Debuggable version of flip_negation."""
-    new_text = original_flip_negation(text)
-    debug_print(DEBUG, f"[flip_negation] Input (first 100 chars): {text[:100]}...\nResult (first 100 chars): {new_text[:100]}...")
-    return new_text
-
-class GPTModel:
-    def __init__(self, server_url: str, model_name: str = "llama", max_context_chars: int = 2000, multi_chunk: bool = False):
-        print(f"Using llama-server at {server_url} for model '{model_name}'")
+# -------------------------
+# Legacy implementation
+# -------------------------
+class GPTModelLegacy:
+    def __init__(self, server_url: str, model_name="llama", max_context_chars=2000, multi_chunk=True):
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
         self.max_context_chars = max_context_chars
         self.multi_chunk = multi_chunk
+        debug_print(DEBUG, f"[Legacy __init__] server_url={server_url}, model_name={model_name}, "
+                          f"max_context_chars={max_context_chars}, multi_chunk={multi_chunk}")
 
-    def _call_server(self, prompt_text: str, max_tokens: int = 256) -> dict:
-        debug_print(DEBUG, f"[call_server] Prompt length: {len(prompt_text)} chars, max_tokens={max_tokens}")
+    def _call_server(self, prompt_text: str, max_tokens=256) -> dict:
+        debug_print(DEBUG, f"[Legacy _call_server] Prompt length: {len(prompt_text)}, max_tokens={max_tokens}")
+        try:
+            resp = requests.post(
+                f"{self.server_url}/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": prompt_text}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0,
+                    "multi_chunk": False,
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            debug_print(DEBUG, f"[Legacy _call_server] Received chunk length: "
+                              f"{len(data['choices'][0]['message']['content'])}")
+            return data
+        except Exception:
+            traceback.print_exc()
+            return {"choices": [{"message": {"content": ""}, "finish_reason": "error"}]}
+
+    def infer_single_pass(self, prompt: Prompt, max_tokens=4096) -> Output:
+        debug_print(DEBUG, f"[Legacy infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
+        data = self._call_server(prompt.output_text, max_tokens)
+        raw_text = data["choices"][0]["message"]["content"]
+        debug_print(DEBUG, f"[Legacy infer_single_pass] Output length: {len(raw_text)}")
+        return Output(prompt=prompt, raw_output=raw_text)
+
+    def infer_iterative(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
+                        max_iterations=10, flip_negate_flag=False) -> str:
+        prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
+        debug_print(DEBUG, f"[Legacy infer_iterative] Starting iterative inference for prompt length {len(prompt_text)}")
+        generated_text = ""
+        for i in range(max_iterations):
+            recent_context = generated_text[-self.max_context_chars:]
+            current_prompt = prompt_text + (utils_flip_negation(recent_context) if flip_negate_flag else recent_context)
+            debug_print(DEBUG, f"[Legacy infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
+            data = self._call_server(current_prompt, max_chunk_tokens)
+            chunk = data["choices"][0]["message"]["content"]
+            debug_print(DEBUG, f"[Legacy infer_iterative] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
+            generated_text += chunk
+            if data["choices"][0].get("finish_reason", "") != "length" or not chunk:
+                break
+        debug_print(DEBUG, f"[Legacy infer_iterative] Total generated text length: {len(generated_text)}")
+        return generated_text
+
+    def infer_iterative_exploit(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
+                                max_iterations=10, flip_negate_flag=False) -> str:
+        prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
+        debug_print(DEBUG, f"[Legacy infer_iterative_exploit] Starting exploit iterative inference for prompt length {len(prompt_text)}")
+        generated_text = ""
+        current_prompt = prompt_text
+        for i in range(max_iterations):
+            debug_print(DEBUG, f"[Legacy infer_iterative_exploit] Iteration {i+1}")
+            data = self._call_server(current_prompt, max_chunk_tokens)
+            chunk = data["choices"][0]["message"]["content"]
+            if flip_negate_flag:
+                chunk = utils_flip_negation(chunk)
+            debug_print(DEBUG, f"[Legacy infer_iterative_exploit] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
+            generated_text += chunk
+            if data["choices"][0].get("finish_reason", "") != "length" or not chunk:
+                break
+            current_prompt = prompt_text + generated_text
+        debug_print(DEBUG, f"[Legacy infer_iterative_exploit] Total generated text length: {len(generated_text)}")
+        return generated_text
+
+    def infer_iterative_with_prompt_list(self, prompts: Union[Prompt, List[Prompt]],
+                                         max_chunk_tokens=256, max_iterations=10,
+                                         flip_negate_flag=False) -> List[Output]:
+        all_outputs: List[Output] = []
+        prompt_list = [prompts] if isinstance(prompts, Prompt) else prompts
+        for prompt in prompt_list:
+            debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Processing prompt id: {id(prompt)}")
+            accumulated_context = ""
+            for item in prompt.prompt_list:
+                ptext = item["text"].strip()
+                if not ptext:
+                    continue
+                generated_text = ""
+                for i in range(max_iterations):
+                    recent_context = generated_text[-self.max_context_chars:]
+                    context_to_use = accumulated_context + "\n\n" + recent_context if accumulated_context else recent_context
+                    current_prompt = ptext + (utils_flip_negation(context_to_use) if flip_negate_flag else context_to_use)
+                    debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
+                    data = self._call_server(current_prompt, max_chunk_tokens)
+                    chunk = data["choices"][0]["message"]["content"]
+                    debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
+                    generated_text += chunk
+                    if data["choices"][0].get("finish_reason", "") != "length" or not chunk:
+                        break
+                all_outputs.append(Output(prompt=prompt, raw_output=generated_text))
+                accumulated_context += "\n\n" + generated_text
+                debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Accumulated context length: {len(accumulated_context)}")
+        return all_outputs
+
+
+# -------------------------
+# Modern implementation
+# -------------------------
+class GPTModelModern:
+    def __init__(self, server_url: str, model_name="llama", max_context_chars=2000,
+                 multi_chunk=True, strip_harmony_tokens=True):
+        self.server_url = server_url.rstrip('/')
+        self.model_name = model_name
+        self.max_context_chars = max_context_chars
+        self.multi_chunk = multi_chunk
+        self.strip_harmony_tokens = strip_harmony_tokens
+        debug_print(DEBUG, f"[Modern __init__] server_url={server_url}, model_name={model_name}, "
+                          f"max_context_chars={max_context_chars}, multi_chunk={multi_chunk}, "
+                          f"strip_harmony_tokens={strip_harmony_tokens}")
+
+    def _call_server(self, prompt_text: str, max_tokens=256) -> dict:
+        debug_print(DEBUG, f"[Modern _call_server] Prompt length: {len(prompt_text)}, max_tokens={max_tokens}")
         try:
             resp = requests.post(
                 f"{self.server_url}/v1/chat/completions",
@@ -38,119 +153,117 @@ class GPTModel:
             )
             resp.raise_for_status()
             data = resp.json()
-            debug_print(DEBUG, f"[call_server] Received chunk length: {len(data['choices'][0]['message']['content'])}")
+            debug_print(DEBUG, f"[Modern _call_server] Received chunk length: "
+                              f"{len(data['choices'][0]['message']['content'])}")
             return data
         except Exception:
             traceback.print_exc()
-            return {"choices": [{"message": {"content": ""}}]}
+            return {"choices": [{"message": {"content": ""}, "finish_reason": "error"}]}
 
-    def _get_item_text(self, item) -> str:
-        if isinstance(item, dict):
-            return item.get("text", "")
-        elif isinstance(item, str):
-            return item
-        return ""
+    def _extract_text(self, item) -> str:
+        text = item.get("message", {}).get("content") if isinstance(item, dict) else str(item)
+        if self.strip_harmony_tokens:
+            text = "".join(c for c in text if ord(c) not in HARMONY_TOKEN_IDS)
+        return text
 
-    def infer_single_pass(self, prompt: Prompt, max_tokens: int = 4096) -> Output:
-        debug_print(DEBUG, f"[infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
-        out_text = self._call_server(prompt.output_text, max_tokens)["choices"][0]["message"]["content"]
-        return Output(prompt=prompt, raw_output=out_text)
+    def infer_single_pass(self, prompt: Prompt, max_tokens=4096) -> Output:
+        debug_print(DEBUG, f"[Modern infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
+        data = self._call_server(prompt.output_text, max_tokens)
+        raw_text = self._extract_text(data["choices"][0])
+        debug_print(DEBUG, f"[Modern infer_single_pass] Output length: {len(raw_text)}")
+        return Output(prompt=prompt, raw_output=raw_text)
 
-    def infer_iterative(
-        self,
-        prompt: str,
-        max_chunk_tokens: int = 256,
-        max_iterations: int = 10,
-        flip_negate_flag: bool = False
-    ) -> str:
-        """Iterative generation for a single string prompt with sliding context"""
-        debug_print(DEBUG, f"[infer_iterative] Starting iterative inference for prompt length {len(prompt)}")
+    def infer_iterative(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
+                        max_iterations=10, flip_negate_flag=False) -> str:
+        prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
+        debug_print(DEBUG, f"[Modern infer_iterative] Starting iterative inference for prompt length {len(prompt_text)}")
         generated_text = ""
-
         for i in range(max_iterations):
-            recent_context = generated_text[-max(0, self.max_context_chars - len(prompt)):]
-            current_prompt = prompt + (flip_negation(recent_context) if flip_negate_flag else recent_context)
-
-            debug_print(DEBUG, f"[infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
+            current_prompt = prompt_text + generated_text
+            debug_print(DEBUG, f"[Modern infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
             data = self._call_server(current_prompt, max_chunk_tokens)
-            chunk = data["choices"][0]["message"]["content"]
-            finish_reason = data["choices"][0].get("finish_reason", "")
-
-            debug_print(DEBUG, f"[infer_iterative] Chunk length: {len(chunk)}, finish_reason: {finish_reason}")
+            chunk = self._extract_text(data["choices"][0])
+            debug_print(DEBUG, f"[Modern infer_iterative] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
-
-            if finish_reason != "length":
+            if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                 break
-
+        debug_print(DEBUG, f"[Modern infer_iterative] Total generated text length: {len(generated_text)}")
         return generated_text
 
-    def infer_iterative_exploit(
-        self,
-        prompt: str,
-        max_chunk_tokens: int = 256,
-        max_iterations: int = 10,
-        flip_negate_flag: bool = False
-    ) -> str:
-        """Iterative with optional negation flipping"""
-        debug_print(DEBUG, f"[infer_iterative_exploit] Starting exploit iterative inference for prompt length {len(prompt)}")
+    def infer_iterative_exploit(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
+                                max_iterations=10, flip_negate_flag=False) -> str:
+        prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
+        debug_print(DEBUG, f"[Modern infer_iterative_exploit] Starting exploit iterative inference for prompt length {len(prompt_text)}")
         generated_text = ""
-        current_prompt = prompt
-
+        current_prompt = prompt_text
         for i in range(max_iterations):
-            debug_print(DEBUG, f"[infer_iterative_exploit] Iteration {i+1}")
+            debug_print(DEBUG, f"[Modern infer_iterative_exploit] Iteration {i+1}")
             data = self._call_server(current_prompt, max_chunk_tokens)
-            chunk = data["choices"][0]["message"]["content"]
-            finish_reason = data["choices"][0].get("finish_reason", "")
-
-            debug_print(DEBUG, f"[infer_iterative_exploit] Chunk length: {len(chunk)}, finish_reason: {finish_reason}")
+            chunk = self._extract_text(data["choices"][0])
+            if flip_negate_flag:
+                chunk = utils_flip_negation(chunk)
+            debug_print(DEBUG, f"[Modern infer_iterative_exploit] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
-
-            if finish_reason != "length":
+            if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                 break
-
-            current_prompt += flip_negation(chunk) if flip_negate_flag else chunk
-
+            current_prompt += chunk
+        debug_print(DEBUG, f"[Modern infer_iterative_exploit] Total generated text length: {len(generated_text)}")
         return generated_text
 
-    def infer_iterative_with_prompt_list(
-        self,
-        prompts: Union[Prompt, List[Prompt]],
-        max_chunk_tokens: int = 256,
-        max_iterations: int = 10,
-        flip_negate_flag: bool = False
-    ) -> List[Output]:
+    def infer_iterative_with_prompt_list(self, prompts: Union[Prompt, List[Prompt]],
+                                         max_chunk_tokens=256, max_iterations=10,
+                                         flip_negate_flag=False) -> List[Output]:
         all_outputs: List[Output] = []
-
-        if isinstance(prompts, Prompt):
-            prompt_list = [prompts]
-        elif isinstance(prompts, list) and all(isinstance(p, Prompt) for p in prompts):
-            prompt_list = prompts
-        else:
-            raise TypeError(f"Expected Prompt or list of Prompts, got {type(prompts)}")
-
+        prompt_list = [prompts] if isinstance(prompts, Prompt) else prompts
         for prompt in prompt_list:
-            debug_print(DEBUG, f"[infer_iterative_with_prompt_list] Processing prompt id: {id(prompt)}")
+            debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Processing prompt id: {id(prompt)}")
             accumulated_context = ""
-
             for item in prompt.prompt_list:
-                ptext = self._get_item_text(item).strip()
+                ptext = self._extract_text(item).strip()
                 if not ptext:
                     continue
-
                 generated_text = ""
                 for i in range(max_iterations):
-                    recent_context = generated_text[-max(0, self.max_context_chars - len(ptext)):]
-                    context_to_use = accumulated_context + "\n\n" + recent_context if accumulated_context else recent_context
-                    current_prompt = ptext + (flip_negation(context_to_use) if flip_negate_flag else context_to_use)
-
-                    debug_print(DEBUG, f"[infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
-                    chunk = self._call_server(current_prompt, max_chunk_tokens)["choices"][0]["message"]["content"]
+                    current_prompt = ptext + accumulated_context + generated_text
+                    debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
+                    data = self._call_server(current_prompt, max_chunk_tokens)
+                    chunk = self._extract_text(data["choices"][0])
+                    debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
                     generated_text += chunk
-                    if not chunk:
+                    if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                         break
-
-                debug_print(DEBUG, f"[infer_iterative_with_prompt_list] Generated text length: {len(generated_text)}")
                 all_outputs.append(Output(prompt=prompt, raw_output=generated_text))
                 accumulated_context += "\n\n" + generated_text
-
+                debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Accumulated context length: {len(accumulated_context)}")
         return all_outputs
+
+
+
+# -------------------------
+# Wrapper that selects impl per call
+# -------------------------
+class GPTModel:
+    def __init__(self, server_url, model_name="llama", max_context_chars=2000,
+                 multi_chunk=True, strip_harmony_tokens=True):
+        self.legacy_impl = GPTModelLegacy(server_url, model_name, max_context_chars, multi_chunk)
+        self.modern_impl = GPTModelModern(server_url, model_name, max_context_chars, multi_chunk, strip_harmony_tokens)
+
+    def infer_single_pass(self, prompt: Prompt, max_tokens=4096, legacy_mode=False):
+        if legacy_mode:
+            return self.legacy_impl.infer_single_pass(prompt, max_tokens)
+        return self.modern_impl.infer_single_pass(prompt, max_tokens)
+
+    def infer_iterative(self, *args, legacy_mode=False, **kwargs):
+        if legacy_mode:
+            return self.legacy_impl.infer_iterative(*args, **kwargs)
+        return self.modern_impl.infer_iterative(*args, **kwargs)
+
+    def infer_iterative_exploit(self, *args, legacy_mode=False, **kwargs):
+        if legacy_mode:
+            return self.legacy_impl.infer_iterative_exploit(*args, **kwargs)
+        return self.modern_impl.infer_iterative_exploit(*args, **kwargs)
+
+    def infer_iterative_with_prompt_list(self, *args, legacy_mode=False, **kwargs):
+        if legacy_mode:
+            return self.legacy_impl.infer_iterative_with_prompt_list(*args, **kwargs)
+        return self.modern_impl.infer_iterative_with_prompt_list(*args, **kwargs)

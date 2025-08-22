@@ -78,7 +78,8 @@ class GeneratorBase(PluginBase):
             iterator,
             run_prompt.max_tokens_per_chunk,
             run_prompt.max_iterations,
-            run_prompt.flip_negate
+            run_prompt.flip_negate,
+            run_prompt.legacy_mode
         )
 
         clean_output = pm.process_output(
@@ -116,7 +117,8 @@ class GeneratorBase(PluginBase):
                 iterator,
                 run_prompt.max_tokens_per_chunk,
                 run_prompt.max_iterations,
-                run_prompt.flip_negate
+                run_prompt.flip_negate,
+                run_prompt.legacy_mode
             )
 
             mutated_output = pm.process_output(

@@ -3,6 +3,7 @@ import argparse
 import os
 import json
 import csv
+import requests
 from datetime import datetime
 
 from plugin_loader import load_plugin, load_detector, load_generator, load_logger, load_mutator
@@ -23,6 +24,18 @@ PROCESSOR_MAP = {
     "base": BasePromptProcessor,
     "replay": ReplayPromptProcessor,
 }
+
+def get_server_version(server_url: str):
+    """
+    Returns the full JSON response from /v1/version.
+    If the endpoint is missing or unreachable, returns a dict with an error message.
+    """
+    try:
+        resp = requests.get(f"{server_url}/v1/version", timeout=2)
+        resp.raise_for_status()
+        return resp.json()  # Return the full JSON response
+    except requests.RequestException as e:
+        return {"error": "endpoint not available", "details": str(e)}
 
 def make_processor(name: str, path: str) -> BasePromptProcessor:
     cls: Type[BasePromptProcessor] = PROCESSOR_MAP.get(name.lower())
@@ -130,6 +143,12 @@ def main():
         default="base",
         help="Which prompt processor to use"
     )
+    parser.add_argument(
+        "--legacy_mode",
+        action="store_true",
+        default=True,  # default to on
+        help="Use legacy mode for channel extraction and output handling"
+    )
     args = parser.parse_args()
 
     # Determine iteration mode
@@ -143,6 +162,8 @@ def main():
         iterator = 1
 
     DEBUG = args.debug
+
+    server_version = get_server_version(server_url=args.server_url)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = os.path.join("reports", f"redteam_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
@@ -153,11 +174,16 @@ def main():
     crit_json_path = os.path.join(run_dir, "redteam_critical.json")
     args_json_path = os.path.join(run_dir, "run_arguments.json")
 
+    # --- Save run arguments ---
+    args_dict = vars(args).copy()
+    args_dict["server_version"] = server_version
+
     with open(args_json_path, "w", encoding="utf-8") as f:
-        json.dump(vars(args), f, indent=2, ensure_ascii=False)
+        json.dump(args_dict, f, indent=2, ensure_ascii=False)
         f.flush()
         os.fsync(f.fileno())
-    print(f"[Saved] Run arguments: {args_json_path}")
+
+    print(f"[Saved] Run arguments: {args_json_path} | Server version: {server_version}")
 
     # Parameter maps
     detector_param_map = {
@@ -198,10 +224,20 @@ def main():
 
     all_records: list[Record] = []
 
-    full_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
-                       "analysis_clean", "analysis_mutated", "mutation_iteration", "run_dir"]
-    crit_csv_fields = ["original_prompt", "mutated_prompt", "clean_output", "mutated_output",
-                       "critical_analysis", "analysis_clean", "analysis_mutated", "run_dir"]
+    full_csv_fields = [
+        "original_prompt", "mutated_prompt",
+        "clean_output", "mutated_output",
+        "clean_channels", "mutated_channels",
+        "analysis_clean", "analysis_mutated",
+        "mutation_iteration", "run_dir"
+    ]
+    crit_csv_fields = [
+        "original_prompt", "mutated_prompt", 
+        "clean_output", "mutated_output",
+        "analysis_clean", "analysis_mutated",
+        "clean_channels", "mutated_channels",
+        "critical_analysis", "run_dir"
+    ]
 
     # ANSI colors
     RED = "\033[31m"
@@ -254,6 +290,7 @@ def main():
                 generator_plugins=generators,
                 logger_plugins=loggers,
                 mutator_plugins=mutators,
+                legacy_mode=args.legacy_mode  # <-- set legacy_mode here
             )
 
             recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
