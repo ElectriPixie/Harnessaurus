@@ -10,7 +10,6 @@ from pydantic import BaseModel
 import uvicorn
 import time
 import uuid
-import hashlib
 import argparse
 import math
 from datetime import datetime
@@ -32,7 +31,8 @@ parser.add_argument("--model_id", type=str, default="/data/AI/Models/gpt-oss-20b
 parser.add_argument("--max_tokens", type=int, default=4096)
 parser.add_argument("--chunk_size", type=int, default=512)
 parser.add_argument("--num_threads", type=int, default=4)
-parser.add_argument("--multi_chunk", action="store_true", default=False)
+parser.add_argument("--multi_chunk", action="store_true", default=False)   # client-facing
+parser.add_argument("--chunk_streaming", action="store_true", default=False)  # server-side
 parser.add_argument("--strip_legacy_format", action="store_true", default=True)
 parser.add_argument("--port", type=int, default=6589)
 parser.add_argument("--temperature", type=float, default=0.1)
@@ -79,7 +79,7 @@ logger.info(f"Model loaded on device {next(model.parameters()).device}")
 # --- Threading & job management ---
 job_queue = Queue()
 results = {}
-output_buffers = {}  # Store full text per request_id
+output_buffers = {}
 lock = threading.Lock()
 
 
@@ -96,7 +96,8 @@ def flatten_entries(entries):
     return flat_list
 
 
-def generate_harmony_text(messages, max_tokens, multi_chunk):
+def generate_harmony_text(messages, max_tokens, request_id, chunk_streaming=False):
+    """Generate text with optional server-side streaming in chunks."""
     convo_messages = [
         Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
         Message.from_role_and_content(Role.DEVELOPER, DeveloperContent.new().with_instructions("Respond helpfully and safely"))
@@ -108,7 +109,7 @@ def generate_harmony_text(messages, max_tokens, multi_chunk):
     prefill_ids_list = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
     stop_token_ids = encoding.stop_tokens_for_assistant_actions()
 
-    # Ensure proper termination tokens
+    # Ensure termination tokens
     while prefill_ids_list and prefill_ids_list[-1] == 200007:
         prefill_ids_list.pop()
     if not prefill_ids_list or prefill_ids_list[-1] != 200006:
@@ -117,19 +118,22 @@ def generate_harmony_text(messages, max_tokens, multi_chunk):
     input_ids = torch.tensor(prefill_ids_list, device=model.device).unsqueeze(0)
     full_text = ""
     tokens_generated = 0
-    iterations = math.ceil(max_tokens / args.chunk_size) if multi_chunk else 1
+
+    iterations = math.ceil(max_tokens / args.chunk_size) if chunk_streaming else 1
 
     for _ in range(iterations):
         do_sample_flag = args.do_sample and not DETERMINISTIC
         generate_kwargs = {
             "max_new_tokens": min(args.chunk_size, max_tokens - tokens_generated),
             "do_sample": do_sample_flag,
-            "temperature": args.temperature if do_sample_flag else 0.0,
-            "top_k": args.top_k if do_sample_flag else 1,
-            "top_p": args.top_p if do_sample_flag else 1.0,
             "eos_token_id": stop_token_ids
         }
-
+        if do_sample_flag:
+            generate_kwargs.update({
+                "temperature": args.temperature,
+                "top_k": args.top_k,
+                "top_p": args.top_p
+            })
         if REPETITION_CONTROL:
             if args.no_repeat_ngram_size > 0:
                 generate_kwargs["no_repeat_ngram_size"] = args.no_repeat_ngram_size
@@ -146,17 +150,27 @@ def generate_harmony_text(messages, max_tokens, multi_chunk):
             completion_ids = torch.tensor([t for t in completion_ids.tolist() if t not in LEGACY_TOKENS], device=model.device)
 
         assistant_entries = encoding.parse_messages_from_completion_tokens(completion_ids, Role.ASSISTANT)
-        assistant_entries = flatten_entries(assistant_entries)
         chunk_text = " ".join(flatten_entries(assistant_entries))
-        full_text += chunk_text
+
+        if chunk_streaming:
+            with lock:
+                output_buffers[request_id] = output_buffers.get(request_id, "") + chunk_text
+        else:
+            full_text += chunk_text
+
         tokens_generated += len(chunk_text.split())
 
-        if multi_chunk:
+        if chunk_streaming:
             input_ids = torch.cat([input_ids, completion_ids.unsqueeze(0)], dim=1)
+
         if len(completion_ids) < min(args.chunk_size, max_tokens - tokens_generated):
             break
 
-    return full_text
+    if not chunk_streaming:
+        with lock:
+            output_buffers[request_id] = full_text
+
+    return output_buffers[request_id]
 
 
 # --- Worker thread ---
@@ -165,10 +179,10 @@ def model_worker():
         job = job_queue.get()
         if job is None:
             break
-        job_id, messages, max_tokens, multi_chunk, request_id = job
+        job_id, messages, max_tokens, multi_chunk, request_id, chunk_streaming = job
         start_time = time.time()
         try:
-            text = generate_harmony_text(messages, max_tokens, multi_chunk)
+            text = generate_harmony_text(messages, max_tokens, request_id, chunk_streaming)
             duration = time.time() - start_time
             with lock:
                 results[job_id] = {
@@ -181,7 +195,6 @@ def model_worker():
                     "request_id": request_id,
                     "multi_chunk": multi_chunk
                 }
-                output_buffers[request_id] = text.strip()
         except Exception as e:
             logger.exception(f"[Worker] ERROR Job {job_id} | Request ID: {request_id}")
             with lock:
@@ -205,12 +218,12 @@ for i in range(args.num_threads):
 
 
 # --- Job submission ---
-def submit_generation(messages, max_tokens=None, multi_chunk=None, request_id=None):
+def submit_generation(messages, max_tokens=None, multi_chunk=None, request_id=None, chunk_streaming=False):
     max_tokens = max_tokens or args.max_tokens
     multi_chunk = multi_chunk if multi_chunk is not None else args.multi_chunk
     with lock:
         job_id = len(results)
-    job_queue.put((job_id, messages, max_tokens, multi_chunk, request_id))
+    job_queue.put((job_id, messages, max_tokens, multi_chunk, request_id, chunk_streaming))
     while True:
         with lock:
             if job_id in results:
@@ -224,13 +237,15 @@ class ChatCompletionRequest(BaseModel):
     messages: list
     max_tokens: int = args.max_tokens
     multi_chunk: bool = None
+    chunk_streaming: bool = None
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     request_id = str(uuid.uuid4())
     multi_chunk = req.multi_chunk if req.multi_chunk is not None else args.multi_chunk
-    result = submit_generation(req.messages, req.max_tokens, multi_chunk, request_id)
+    chunk_streaming = req.chunk_streaming if req.chunk_streaming is not None else False
+    result = submit_generation(req.messages, req.max_tokens, multi_chunk, request_id, chunk_streaming)
     return {
         "id": request_id,
         "object": "chat.completion",
@@ -271,7 +286,7 @@ async def get_chunk(request_id: str, chunk_index: int = 0, chunk_size: int = 512
 @app.get("/v1/version")
 async def version():
     return {
-        "version": "0.4.0",
+        "version": "0.5.0",
         "model_id": args.model_id,
         "harmony_mode": "OpenAI-Harmony",
         "deterministic": "Yes" if DETERMINISTIC else "No"

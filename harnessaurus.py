@@ -146,7 +146,7 @@ def main():
     parser.add_argument(
         "--legacy_mode",
         action="store_true",
-        default=True,  # default to on
+        default=False,
         help="Use legacy mode for channel extraction and output handling"
     )
     args = parser.parse_args()
