@@ -14,15 +14,14 @@ HARMONY_TOKEN_IDS = {200000, 200001, 200002, 200003, 200004, 200005, 200006, 200
 # Legacy implementation
 # -------------------------
 class GPTModelLegacy:
-    def __init__(self, server_url: str, model_name="llama", max_context_chars=2000, multi_chunk=True):
+    def __init__(self, server_url: str, model_name="llama", max_context_chars=2000):
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
         self.max_context_chars = max_context_chars
-        self.multi_chunk = multi_chunk
         debug_print(DEBUG, f"[Legacy __init__] server_url={server_url}, model_name={model_name}, "
-                          f"max_context_chars={max_context_chars}, multi_chunk={multi_chunk}")
+                          f"max_context_chars={max_context_chars}")
 
-    def _call_server(self, prompt_text: str, max_tokens=256) -> dict:
+    def _call_server(self, prompt_text: str, max_tokens=256, multi_chunk: bool = False) -> dict:
         debug_print(DEBUG, f"[Legacy _call_server] Prompt length: {len(prompt_text)}, max_tokens={max_tokens}")
         try:
             resp = requests.post(
@@ -33,7 +32,8 @@ class GPTModelLegacy:
                     "messages": [{"role": "user", "content": prompt_text}],
                     "max_tokens": max_tokens,
                     "temperature": 0,
-                    "multi_chunk": False,
+                    "multi_chunk": multi_chunk,
+                    "chunk_size": max_tokens,
                 },
                 timeout=120
             )
@@ -48,7 +48,7 @@ class GPTModelLegacy:
 
     def infer_single_pass(self, prompt: Prompt, max_tokens=4096) -> Output:
         debug_print(DEBUG, f"[Legacy infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
-        data = self._call_server(prompt.output_text, max_tokens)
+        data = self._call_server(prompt_text=prompt.output_text, max_tokens=max_tokens, multi_chunk=False)
         raw_text = data["choices"][0]["message"]["content"]
         debug_print(DEBUG, f"[Legacy infer_single_pass] Output length: {len(raw_text)}")
         return Output(prompt=prompt, raw_output=raw_text)
@@ -62,7 +62,7 @@ class GPTModelLegacy:
             recent_context = generated_text[-self.max_context_chars:]
             current_prompt = prompt_text + (utils_flip_negation(recent_context) if flip_negate_flag else recent_context)
             debug_print(DEBUG, f"[Legacy infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
-            data = self._call_server(current_prompt, max_chunk_tokens)
+            data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
             chunk = data["choices"][0]["message"]["content"]
             debug_print(DEBUG, f"[Legacy infer_iterative] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
@@ -79,7 +79,7 @@ class GPTModelLegacy:
         current_prompt = prompt_text
         for i in range(max_iterations):
             debug_print(DEBUG, f"[Legacy infer_iterative_exploit] Iteration {i+1}")
-            data = self._call_server(current_prompt, max_chunk_tokens)
+            data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
             chunk = data["choices"][0]["message"]["content"]
             if flip_negate_flag:
                 chunk = utils_flip_negation(chunk)
@@ -109,7 +109,7 @@ class GPTModelLegacy:
                     context_to_use = accumulated_context + "\n\n" + recent_context if accumulated_context else recent_context
                     current_prompt = ptext + (utils_flip_negation(context_to_use) if flip_negate_flag else context_to_use)
                     debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
-                    data = self._call_server(current_prompt, max_chunk_tokens)
+                    data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
                     chunk = data["choices"][0]["message"]["content"]
                     debug_print(DEBUG, f"[Legacy infer_iterative_with_prompt_list] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
                     generated_text += chunk
@@ -126,17 +126,15 @@ class GPTModelLegacy:
 # -------------------------
 class GPTModelModern:
     def __init__(self, server_url: str, model_name="llama", max_context_chars=2000,
-                 multi_chunk=True, strip_harmony_tokens=True):
+                 strip_harmony_tokens=True):
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
         self.max_context_chars = max_context_chars
-        self.multi_chunk = multi_chunk
         self.strip_harmony_tokens = strip_harmony_tokens
         debug_print(DEBUG, f"[Modern __init__] server_url={server_url}, model_name={model_name}, "
-                          f"max_context_chars={max_context_chars}, multi_chunk={multi_chunk}, "
-                          f"strip_harmony_tokens={strip_harmony_tokens}")
+                          f"max_context_chars={max_context_chars}, strip_harmony_tokens={strip_harmony_tokens}")
 
-    def _call_server(self, prompt_text: str, max_tokens=256) -> dict:
+    def _call_server(self, prompt_text: str, max_tokens=256, multi_chunk: bool = False) -> dict:
         debug_print(DEBUG, f"[Modern _call_server] Prompt length: {len(prompt_text)}, max_tokens={max_tokens}")
         try:
             resp = requests.post(
@@ -147,7 +145,8 @@ class GPTModelModern:
                     "messages": [{"role": "user", "content": prompt_text}],
                     "max_tokens": max_tokens,
                     "temperature": 0,
-                    "multi_chunk": self.multi_chunk,
+                    "multi_chunk": multi_chunk,
+                    "chunk_size": max_tokens
                 },
                 timeout=120
             )
@@ -166,9 +165,17 @@ class GPTModelModern:
             text = "".join(c for c in text if ord(c) not in HARMONY_TOKEN_IDS)
         return text
 
+    @staticmethod
+    def _extract_final_answer(raw_text: str, marker="final") -> str:
+        if marker in raw_text:
+            final_text = raw_text.rsplit(marker, 1)[-1].strip()
+        else:
+            final_text = raw_text.strip()
+        return f"<final>{final_text}</final>"
+
     def infer_single_pass(self, prompt: Prompt, max_tokens=4096) -> Output:
         debug_print(DEBUG, f"[Modern infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
-        data = self._call_server(prompt.output_text, max_tokens)
+        data = self._call_server(prompt_text=prompt.output_text, max_tokens=max_tokens)
         raw_text = self._extract_text(data["choices"][0])
         debug_print(DEBUG, f"[Modern infer_single_pass] Output length: {len(raw_text)}")
         return Output(prompt=prompt, raw_output=raw_text)
@@ -181,8 +188,10 @@ class GPTModelModern:
         for i in range(max_iterations):
             current_prompt = prompt_text + generated_text
             debug_print(DEBUG, f"[Modern infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
-            data = self._call_server(current_prompt, max_chunk_tokens)
+            data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
             chunk = self._extract_text(data["choices"][0])
+            if flip_negate_flag:
+                chunk = utils_flip_negation(chunk)
             debug_print(DEBUG, f"[Modern infer_iterative] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
             if not chunk or data["choices"][0].get("finish_reason", "") != "length":
@@ -198,7 +207,7 @@ class GPTModelModern:
         current_prompt = prompt_text
         for i in range(max_iterations):
             debug_print(DEBUG, f"[Modern infer_iterative_exploit] Iteration {i+1}")
-            data = self._call_server(current_prompt, max_chunk_tokens)
+            data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
             chunk = self._extract_text(data["choices"][0])
             if flip_negate_flag:
                 chunk = utils_flip_negation(chunk)
@@ -226,8 +235,10 @@ class GPTModelModern:
                 for i in range(max_iterations):
                     current_prompt = ptext + accumulated_context + generated_text
                     debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
-                    data = self._call_server(current_prompt, max_chunk_tokens)
+                    data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
                     chunk = self._extract_text(data["choices"][0])
+                    if flip_negate_flag:
+                        chunk = utils_flip_negation(chunk)
                     debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
                     generated_text += chunk
                     if not chunk or data["choices"][0].get("finish_reason", "") != "length":
@@ -237,16 +248,14 @@ class GPTModelModern:
                 debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Accumulated context length: {len(accumulated_context)}")
         return all_outputs
 
-
-
 # -------------------------
 # Wrapper that selects impl per call
 # -------------------------
 class GPTModel:
     def __init__(self, server_url, model_name="llama", max_context_chars=2000,
-                 multi_chunk=True, strip_harmony_tokens=True):
-        self.legacy_impl = GPTModelLegacy(server_url, model_name, max_context_chars, multi_chunk)
-        self.modern_impl = GPTModelModern(server_url, model_name, max_context_chars, multi_chunk, strip_harmony_tokens)
+                 strip_harmony_tokens=True):
+        self.legacy_impl = GPTModelLegacy(server_url, model_name, max_context_chars)
+        self.modern_impl = GPTModelModern(server_url, model_name, max_context_chars, strip_harmony_tokens)
 
     def infer_single_pass(self, prompt: Prompt, max_tokens=4096, legacy_mode=False):
         if legacy_mode:

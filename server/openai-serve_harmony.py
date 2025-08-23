@@ -32,8 +32,8 @@ parser.add_argument("--model_id", type=str, default="/data/AI/Models/gpt-oss-20b
 parser.add_argument("--max_tokens", type=int, default=4096)
 parser.add_argument("--chunk_size", type=int, default=512)
 parser.add_argument("--num_threads", type=int, default=4)
-parser.add_argument("--multi_chunk", action="store_true", default=False)
-parser.add_argument("--chunk_streaming", action="store_true", default=False)
+parser.add_argument("--multi_chunk", action="store_true", default=False)   # client-facing
+parser.add_argument("--chunk_streaming", action="store_true", default=False)  # server-side
 parser.add_argument("--strip_legacy_format", action="store_true", default=True)
 parser.add_argument("--port", type=int, default=6589)
 parser.add_argument("--temperature", type=float, default=0.1)
@@ -54,10 +54,6 @@ REPETITION_CONTROL = args.repetition_control.lower() == "on"
 if DETERMINISTIC:
     torch.manual_seed(args.seed)
     torch.use_deterministic_algorithms(True)
-    logging.info(f"Deterministic mode ON | Seed: {args.seed}")
-else:
-    torch.use_deterministic_algorithms(False)
-    logging.info("Deterministic mode OFF | Using PyTorch default RNG")
 
 # --- Logging ---
 os.makedirs("logs", exist_ok=True)
@@ -321,7 +317,7 @@ def model_worker():
 # --- Start workers ---
 for i in range(args.num_threads):
     threading.Thread(target=model_worker, daemon=True, name=f"Worker-{i}").start()
-    logger.debug(f"Started worker thread Worker-{i}")
+
 
 # --- Job submission ---
 def submit_generation(messages, max_tokens=None, multi_chunk=None, request_id=None,
@@ -470,6 +466,7 @@ async def version():
         "harmony_mode": "OpenAI-Harmony",
         "deterministic": "Yes" if DETERMINISTIC else "No"
     }
+
 
 if __name__ == "__main__":
     logger.info(f"Starting server on port {args.port}")

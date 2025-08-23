@@ -266,16 +266,23 @@ for i in range(NUM_THREADS):
     threading.Thread(target=model_worker, daemon=True, name=f"Worker-{i}").start()
 
 # --- Submit job ---
-def submit_generation(messages, max_tokens=MAX_TOKENS, multi_chunk=None, request_id=None):
-    if multi_chunk is None:
-        multi_chunk = DEFAULT_MULTI_CHUNK
+def submit_generation(messages, max_tokens=None, multi_chunk=None, request_id=None, chunk_streaming=False):
+    max_tokens = max_tokens or args.max_tokens
+    multi_chunk = multi_chunk if multi_chunk is not None else args.multi_chunk
     with lock:
         job_id = len(results)
-    job_queue.put((job_id, messages, max_tokens, multi_chunk, request_id))
+        prompt_preview = messages[-1]["content"][:200] if messages else ""
+        prompt_hash = hashlib.sha256("".join([m["content"] for m in messages]).encode()).hexdigest()
+        logger.info(f"[Job Submit] Job ID: {job_id} | Request ID: {request_id} | Multi-chunk: {multi_chunk} | Chunk streaming: {chunk_streaming} | Prompt hash: {prompt_hash}")
+        logger.info(f"[Job Submit] Last user message preview: {prompt_preview}")
+    job_queue.put((job_id, messages, max_tokens, multi_chunk, request_id, chunk_streaming))
+
     while True:
         with lock:
             if job_id in results:
-                return results.pop(job_id)
+                res = results.pop(job_id)
+                logger.info(f"[Job Done] Job ID: {job_id} | Request ID: {request_id} | Tokens: {res['completion_length']} | Finish reason: {res['finish_reason']}")
+                return res
         time.sleep(0.05)
 
 # --- FastAPI Request ---
@@ -290,34 +297,19 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     client_host = request.client.host
     user_agent = request.headers.get("user-agent", "unknown")
     request_id = str(uuid.uuid4())
-    prompt_hash = hashlib.sha256("".join([m["content"] for m in req.messages]).encode()).hexdigest()
-    multi_chunk = req.multi_chunk if req.multi_chunk is not None else DEFAULT_MULTI_CHUNK
+    multi_chunk = req.multi_chunk if req.multi_chunk is not None else args.multi_chunk
+    chunk_streaming = req.chunk_streaming if hasattr(req, "chunk_streaming") and req.chunk_streaming is not None else False
 
-    logger.info(f"[API] Incoming request | Request ID: {request_id} | IP: {client_host} | UA: {user_agent} | Prompt hash: {prompt_hash}")
-    logger.info(f"[API] Last user message preview: {req.messages[-1]['content'][:200]}")
+    logger.info(f"[API] Incoming request | Request ID: {request_id} | IP: {client_host} | UA: {user_agent} | Multi-chunk: {multi_chunk} | Chunk streaming: {chunk_streaming}")
+    if req.messages:
+        logger.info(f"[API] Last user message preview: {req.messages[-1]['content'][:200]}")
 
-    result = submit_generation(req.messages, req.max_tokens, multi_chunk, request_id)
-    content_out = result["harmony"] if HARMONY_MODE == "on" else result["text"]
+    result = submit_generation(req.messages, req.max_tokens, multi_chunk, request_id, chunk_streaming)
+    content_out = result["text"]
 
-    logger.info(f"[API] Response ready | Request ID: {request_id} | Tokens: {result['completion_length']} | Finish reason: {result['finish_reason']}\n{content_out}")
-
-    debug_data = {
-        "duration_seconds": result["duration"],
-        "device": result["device"],
-        "client_host": client_host,
-        "user_agent": user_agent,
-        "request_id": request_id,
-        "prompt_hash": prompt_hash,
-        "multi_chunk": result["multi_chunk"],
-        "harmony_raw": result["harmony"],
-        "prompt_raw": result.get("prompt_raw"),
-    }
-    if DEBUG_MODEL_DATA:
-        debug_data["hidden_states"] = result.get("hidden_states")
-        debug_data["attentions"] = result.get("attentions")
-
+    logger.info(f"[API] Response ready | Request ID: {request_id} | Tokens: {result['completion_length']} | Finish reason: {result['finish_reason']}")
     return {
-        "id": "local-chat-1",
+        "id": request_id,
         "object": "chat.completion",
         "created": int(time.time()),
         "model": req.model,
@@ -327,8 +319,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             "prompt_tokens": result["prompt_length"],
             "completion_tokens": result["completion_length"],
             "total_tokens": result["prompt_length"] + result["completion_length"],
-        },
-        "debug": debug_data
+        }
     }
 
 @app.get("/v1/version")
