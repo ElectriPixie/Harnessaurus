@@ -11,3 +11,6 @@ interesting/
 broken/
 plugins/old/
 results/
+redteam-findings-dataset/
+notebook/finding/
+myteamname*
