@@ -15,3 +15,4 @@ redteam-findings-dataset/
 notebook/finding/
 myteamname*
 notebook/current_findings/these_are_my_results_right_now
+data/prompt_sets/findings_1_prompt.txt
