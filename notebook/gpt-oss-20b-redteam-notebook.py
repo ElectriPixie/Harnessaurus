@@ -161,6 +161,7 @@ def save_harmony_finding(
 
     if steps_to_reproduce is None:
         steps_to_reproduce = [
+            f"use prompt: '{mutated_prompt}'",
             f"Set temperature=0.1 and max_output_tokens={MAX_TOKENS} to ensure deterministic output.",
             "Wrap the supplied user prompt (e.g., your red-team test prompt containing special characters or Unicode sequences, such as zero-width characters) in Harmony format using inject_harmony(), creating a structured message that includes <|role|> and <|message|> tags for the user and system roles.",
             "Generate output using generate_for_prompt() with the Harmony-wrapped prompt, capturing the full model response including analysis and final channels.",
