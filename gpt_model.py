@@ -1,10 +1,11 @@
 import requests
 import traceback
-from typing import Union, List
+from typing import Dict, List, Union
 from data_structures import Prompt, Output
 from utils import (
     flip_negation as utils_flip_negation,
     debug_print,
+    unpack_textcontent
 )
 
 DEBUG = True
@@ -126,7 +127,7 @@ class GPTModelLegacy:
 # -------------------------
 class GPTModelModern:
     def __init__(self, server_url: str, model_name="llama", max_context_chars=2000,
-                 strip_harmony_tokens=True):
+                 strip_harmony_tokens=False):
         self.server_url = server_url.rstrip('/')
         self.model_name = model_name
         self.max_context_chars = max_context_chars
@@ -152,78 +153,125 @@ class GPTModelModern:
             )
             resp.raise_for_status()
             data = resp.json()
-            debug_print(DEBUG, f"[Modern _call_server] Received chunk length: "
-                              f"{len(data['choices'][0]['message']['content'])}")
+
+            # Ensure channels always exist
+            choice = data['choices'][0]['message']
+            if 'channels' not in choice or not isinstance(choice['channels'], list):
+                choice['channels'] = [
+                    {"channel": "final", "content": ""},
+                    {"channel": "analysis", "content": ""},
+                    {"channel": "commentary", "content": ""}
+                ]
+            else:
+                existing = {ch['channel']: ch['content'] for ch in choice['channels']}
+                for name in ["final", "analysis", "commentary"]:
+                    if name not in existing:
+                        choice['channels'].append({"channel": name, "content": ""})
+
+            debug_print(DEBUG, f"[Modern _call_server] Received chunk length: {len(choice.get('content',''))}")
             return data
+
         except Exception:
             traceback.print_exc()
-            return {"choices": [{"message": {"content": ""}, "finish_reason": "error"}]}
+            return {"choices": [{"message": {"content": ""}, "finish_reason": "error", "channels": [
+                {"channel": "final", "content": ""},
+                {"channel": "analysis", "content": ""},
+                {"channel": "commentary", "content": ""}
+            ]}]}
 
     def _extract_text(self, item) -> str:
+        """Return raw text without stripping zero-width or Harmony tokens."""
         text = item.get("message", {}).get("content") if isinstance(item, dict) else str(item)
-        if self.strip_harmony_tokens:
-            text = "".join(c for c in text if ord(c) not in HARMONY_TOKEN_IDS)
         return text
-
-    @staticmethod
-    def _extract_final_answer(raw_text: str, marker="final") -> str:
-        if marker in raw_text:
-            final_text = raw_text.rsplit(marker, 1)[-1].strip()
-        else:
-            final_text = raw_text.strip()
-        return f"<final>{final_text}</final>"
 
     def infer_single_pass(self, prompt: Prompt, max_tokens=4096) -> Output:
         debug_print(DEBUG, f"[Modern infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
         data = self._call_server(prompt_text=prompt.output_text, max_tokens=max_tokens)
+        channels = data['choices'][0]['message'].get('channels', [])
+        if isinstance(channels, dict):
+            channels_dict = {k: str(v) if v is not None else "" for k, v in channels.items()}
+        elif isinstance(channels, list):
+            channels_dict = {ch.get('channel', ''): str(ch.get('content', '')) for ch in channels if 'channel' in ch}
+        else:
+            channels_dict = {"final": "", "analysis": "", "commentary": ""}
         raw_text = self._extract_text(data["choices"][0])
+        raw_text = unpack_textcontent(raw_text)
         debug_print(DEBUG, f"[Modern infer_single_pass] Output length: {len(raw_text)}")
-        return Output(prompt=prompt, raw_output=raw_text)
+        output_obj = Output(prompt=prompt, raw_output=raw_text)
+        output_obj.set_channels(channels_dict)
+        debug_print(DEBUG, f"Channels: {channels}")
+        return output_obj
 
     def infer_iterative(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
-                        max_iterations=10, flip_negate_flag=False) -> str:
+                        max_iterations=10, flip_negate_flag=False) -> Output:
         prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
         debug_print(DEBUG, f"[Modern infer_iterative] Starting iterative inference for prompt length {len(prompt_text)}")
         generated_text = ""
+        accumulated_channels: Dict[str, str] = {}
+
         for i in range(max_iterations):
             current_prompt = prompt_text + generated_text
             debug_print(DEBUG, f"[Modern infer_iterative] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
             data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
+            channels = data['choices'][0]['message'].get('channels', [])
+            for ch in channels:
+                accumulated_channels[ch['channel']] = ch['content']
+
             chunk = self._extract_text(data["choices"][0])
+            chunk = unpack_textcontent(chunk)
             if flip_negate_flag:
                 chunk = utils_flip_negation(chunk)
             debug_print(DEBUG, f"[Modern infer_iterative] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
+
             if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                 break
+
         debug_print(DEBUG, f"[Modern infer_iterative] Total generated text length: {len(generated_text)}")
-        return generated_text
+        output_obj = Output(prompt=prompt, raw_output=generated_text)
+        debug_print(DEBUG, f"Channels: {accumulated_channels}")
+        output_obj.set_channels(accumulated_channels)
+        return output_obj
 
     def infer_iterative_exploit(self, prompt: Union[str, Prompt], max_chunk_tokens=256,
-                                max_iterations=10, flip_negate_flag=False) -> str:
+                                max_iterations=10, flip_negate_flag=False) -> Output:
         prompt_text = prompt.output_text if isinstance(prompt, Prompt) else prompt
         debug_print(DEBUG, f"[Modern infer_iterative_exploit] Starting exploit iterative inference for prompt length {len(prompt_text)}")
         generated_text = ""
+        accumulated_channels: Dict[str, str] = {}
         current_prompt = prompt_text
+
         for i in range(max_iterations):
             debug_print(DEBUG, f"[Modern infer_iterative_exploit] Iteration {i+1}")
             data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
+            channels = data['choices'][0]['message'].get('channels', [])
+            for ch in channels:
+                accumulated_channels[ch['channel']] = ch['content']
+
             chunk = self._extract_text(data["choices"][0])
+            chunk = unpack_textcontent(chunk)
             if flip_negate_flag:
                 chunk = utils_flip_negation(chunk)
             debug_print(DEBUG, f"[Modern infer_iterative_exploit] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
             generated_text += chunk
+
             if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                 break
+
             current_prompt += chunk
+
         debug_print(DEBUG, f"[Modern infer_iterative_exploit] Total generated text length: {len(generated_text)}")
-        return generated_text
+        output_obj = Output(prompt=prompt, raw_output=generated_text)
+        debug_print(DEBUG, f"Channels: {accumulated_channels}")
+        output_obj.set_channels(accumulated_channels)
+        return output_obj
 
     def infer_iterative_with_prompt_list(self, prompts: Union[Prompt, List[Prompt]],
                                          max_chunk_tokens=256, max_iterations=10,
                                          flip_negate_flag=False) -> List[Output]:
         all_outputs: List[Output] = []
         prompt_list = [prompts] if isinstance(prompts, Prompt) else prompts
+
         for prompt in prompt_list:
             debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Processing prompt id: {id(prompt)}")
             accumulated_context = ""
@@ -231,22 +279,44 @@ class GPTModelModern:
                 ptext = self._extract_text(item).strip()
                 if not ptext:
                     continue
+
                 generated_text = ""
+                accumulated_channels: Dict[str, str] = {}
+
                 for i in range(max_iterations):
                     current_prompt = ptext + accumulated_context + generated_text
                     debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Iteration {i+1}, current_prompt length: {len(current_prompt)}")
                     data = self._call_server(prompt_text=current_prompt, max_tokens=max_chunk_tokens, multi_chunk=True)
+                    channels = data['choices'][0]['message'].get('channels', [])
+                    for ch in channels:
+                        accumulated_channels[ch['channel']] = ch['content']
+
                     chunk = self._extract_text(data["choices"][0])
+                    chunk = unpack_textcontent(chunk)
                     if flip_negate_flag:
                         chunk = utils_flip_negation(chunk)
+
                     debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Chunk length: {len(chunk)}, finish_reason: {data['choices'][0].get('finish_reason','')}")
                     generated_text += chunk
+
                     if not chunk or data["choices"][0].get("finish_reason", "") != "length":
                         break
-                all_outputs.append(Output(prompt=prompt, raw_output=generated_text))
-                accumulated_context += "\n\n" + generated_text
-                debug_print(DEBUG, f"[Modern infer_iterative_with_prompt_list] Accumulated context length: {len(accumulated_context)}")
+
+                accumulated_context += generated_text
+                output_obj = Output(prompt=prompt, raw_output=generated_text)
+                debug_print(DEBUG, f"Channels: {accumulated_channels}")
+                output_obj.set_channels(accumulated_channels)
+                all_outputs.append(output_obj)
+
         return all_outputs
+
+    def _normalize_channels(self, channels) -> Dict[str, str]:
+        if isinstance(channels, dict):
+            return {k: str(v) if v is not None else "" for k, v in channels.items()}
+        elif isinstance(channels, list):
+            return {ch.get('channel', ''): str(ch.get('content', '')) for ch in channels if 'channel' in ch}
+        return {"final": "", "analysis": "", "commentary": ""}
+
 
 # -------------------------
 # Wrapper that selects impl per call

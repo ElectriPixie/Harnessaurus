@@ -185,7 +185,7 @@ def model_worker():
                 with torch.no_grad():
                     do_sample_flag = args.do_sample and not DETERMINISTIC
                     generate_kwargs = {
-                        "max_new_tokens": min(CHUNK_SIZE, max_tokens - tokens_generated),
+                        "max_new_tokens": 4096,#temporary bypass #min(CHUNK_SIZE, max_tokens - tokens_generated),
                         "do_sample": do_sample_flag,
                         "return_dict_in_generate": True,
                         "output_hidden_states": DEBUG_MODEL_DATA,

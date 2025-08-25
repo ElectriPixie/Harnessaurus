@@ -80,14 +80,32 @@ class Output:
         """
         return self.raw_output
 
-    def set_channels(self, channels_dict: Dict[str, str]):
+    def set_channels(self, channels_dict: dict):
         """
-        Populate channels dictionary. Also optionally extracts 'final'.
+        Populate channels dictionary safely. Also optionally extracts 'final'.
         """
-        self.channels = channels_dict
-        # Auto-fill final if present in channels and final not set
-        if not self.final and "final" in channels_dict:
-            self.final = channels_dict["final"]
+        if not isinstance(channels_dict, dict):
+            channels_dict = {}
+        
+        # Ensure all expected channels exist
+        safe_channels = {
+            "final": "",
+            "analysis": "",
+            "commentary": ""
+        }
+        for key in safe_channels:
+            try:
+                if key in channels_dict and channels_dict[key] is not None:
+                    safe_channels[key] = str(channels_dict[key])
+            except Exception:
+                # ignore any malformed entry
+                continue
+
+        self.channels = safe_channels
+
+        # Auto-fill final if present and not set
+        if not hasattr(self, "final") or not self.final:
+            self.final = safe_channels.get("final", "")
 
     def get_channel(self, name: str) -> str:
         """
