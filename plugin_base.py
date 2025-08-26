@@ -71,8 +71,22 @@ class GeneratorBase(PluginBase):
         results: list[Record] = []
         iterator = 4 if getattr(prompt_obj, "has_context", False) else run_prompt.iterator
 
+        def normalize_output(output_or_list):
+            """Ensure we always have a list of Output objects with channels dict."""
+            if isinstance(output_or_list, Output):
+                if not hasattr(output_or_list, "channels") or output_or_list.channels is None:
+                    output_or_list.channels = {}
+                return [output_or_list]
+            elif isinstance(output_or_list, list):
+                for o in output_or_list:
+                    if not hasattr(o, "channels") or o.channels is None:
+                        o.channels = {}
+                return output_or_list
+            else:
+                raise TypeError(f"Unexpected output type: {type(output_or_list)}")
+
         # --- Run clean outputs first ---
-        clean_outputs: List[Output] = run_model_inference(
+        clean_outputs = run_model_inference(
             model,
             prompt_obj,
             iterator,
@@ -81,11 +95,15 @@ class GeneratorBase(PluginBase):
             run_prompt.flip_negate,
             run_prompt.legacy_mode,
         )
+        clean_outputs = normalize_output(clean_outputs)
 
-        # Apply detectors to each clean output
+        # Apply detectors
         clean_outputs = [
-            pm.process_output(prompt_obj=prompt_obj, output_obj=o,
-                            plugins_to_apply=getattr(run_prompt, "use_detectors", []))
+            pm.process_output(
+                prompt_obj=prompt_obj,
+                output_obj=o,
+                plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+            )
             for o in clean_outputs
         ]
 
@@ -94,10 +112,10 @@ class GeneratorBase(PluginBase):
             record = Record(
                 original_prompt="\n".join([el["text"] for el in prompt_obj.prompt_list]),
                 mutated_prompt=None,
-                clean_output=clean_outputs,  # now storing list
-                mutated_output=[],
+                clean_outputs=clean_outputs,
+                mutated_outputs=[],
                 mutation_iteration=0,
-                run_dir=run_prompt.run_dir
+                run_dir=run_prompt.run_dir,
             )
             aggregator.add_record(record)
             pm.process_log(record)
@@ -112,7 +130,7 @@ class GeneratorBase(PluginBase):
                 plugins_to_apply=getattr(run_prompt, "use_mutators", [])
             )
 
-            mutated_outputs: List[Output] = run_model_inference(
+            mutated_outputs = run_model_inference(
                 model,
                 mutated_prompt,
                 iterator,
@@ -121,21 +139,25 @@ class GeneratorBase(PluginBase):
                 run_prompt.flip_negate,
                 run_prompt.legacy_mode,
             )
+            mutated_outputs = normalize_output(mutated_outputs)
 
-            # Apply detectors to each mutated output
+            # Apply detectors
             mutated_outputs = [
-                pm.process_output(prompt_obj=mutated_prompt, output_obj=o,
-                                plugins_to_apply=getattr(run_prompt, "use_detectors", []))
+                pm.process_output(
+                    prompt_obj=mutated_prompt,
+                    output_obj=o,
+                    plugins_to_apply=getattr(run_prompt, "use_detectors", [])
+                )
                 for o in mutated_outputs
             ]
 
             record = Record(
                 original_prompt="\n".join([el["text"] for el in prompt_obj.prompt_list]),
                 mutated_prompt="\n".join([el["text"] for el in mutated_prompt.prompt_list]),
-                clean_output=clean_outputs,
-                mutated_output=mutated_outputs,
+                clean_outputs=clean_outputs,
+                mutated_outputs=mutated_outputs,
                 mutation_iteration=mutation_index,
-                run_dir=run_prompt.run_dir
+                run_dir=run_prompt.run_dir,
             )
             aggregator.add_record(record)
             pm.process_log(record)
@@ -143,13 +165,14 @@ class GeneratorBase(PluginBase):
 
             # Stop early if RefusalDetector accepted and loop=False
             if not getattr(run_prompt, "loop", True):
-                refusal = {o.analysis.get("RefusalDetector", {}) for o in mutated_outputs}
-                if any(r.get("status") == "accepted" for r in refusal):
+                refusal_statuses = [
+                    o.analysis.get("RefusalDetector", {}).get("status") for o in mutated_outputs
+                ]
+                if "accepted" in refusal_statuses:
                     print(f"[INFO] RefusalDetector accepted at mutation {mutation_index}, stopping early")
                     break
 
         return results
-
 
     def run_generated(
         self,

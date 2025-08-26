@@ -127,15 +127,35 @@ class Record:
     run_dir: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        def channels_to_text(outputs: List[Any]) -> Dict[str, List[str]]:
+            """
+            Convert a list of Output objects (or mixed types) into a dict of channel_name -> list of texts.
+            """
+            result: Dict[str, List[str]] = {}
+            for out in outputs:
+                if isinstance(out, Output):
+                    channels = getattr(out, "channels", {}) or {}
+                    for name, content in channels.items():
+                        # Ensure content is a list of strings
+                        if isinstance(content, list):
+                            texts = [c.text if hasattr(c, "text") else str(c) for c in content]
+                        else:
+                            texts = [str(content)]
+                        result.setdefault(name, []).extend(texts)
+                else:
+                    # fallback: treat the whole output as 'final' text
+                    result.setdefault("final", []).append(str(out))
+            return result
+
         return {
             "original_prompt": self.original_prompt or "",
             "mutated_prompt": self.mutated_prompt or "",
-            "clean_output": [o.raw_output for o in self.clean_outputs],
-            "mutated_output": [o.raw_output for o in self.mutated_outputs],
-            "clean_channels": [o.channels for o in self.clean_outputs],
-            "mutated_channels": [o.channels for o in self.mutated_outputs],
-            "analysis_clean": [o.analysis for o in self.clean_outputs],
-            "analysis_mutated": [o.analysis for o in self.mutated_outputs],
+            "clean_outputs": [getattr(o, "raw_output", str(o)) for o in self.clean_outputs],
+            "mutated_outputs": [getattr(o, "raw_output", str(o)) for o in self.mutated_outputs],
+            "clean_channels": channels_to_text(self.clean_outputs),
+            "mutated_channels": channels_to_text(self.mutated_outputs),
+            "analysis_clean": [getattr(o, "analysis", {}) for o in self.clean_outputs if hasattr(o, "analysis")],
+            "analysis_mutated": [getattr(o, "analysis", {}) for o in self.mutated_outputs if hasattr(o, "analysis")],
             "mutation_iteration": self.mutation_iteration,
             "run_dir": self.run_dir,
         }

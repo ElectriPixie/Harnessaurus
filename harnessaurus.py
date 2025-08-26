@@ -226,14 +226,14 @@ def main():
 
     full_csv_fields = [
         "original_prompt", "mutated_prompt",
-        "clean_output", "mutated_output",
+        "clean_outputs", "mutated_outputs",
         "clean_channels", "mutated_channels",
         "analysis_clean", "analysis_mutated",
         "mutation_iteration", "run_dir"
     ]
     crit_csv_fields = [
         "original_prompt", "mutated_prompt", 
-        "clean_output", "mutated_output",
+        "clean_outputs", "mutated_outputs",
         "analysis_clean", "analysis_mutated",
         "clean_channels", "mutated_channels",
         "critical_analysis", "run_dir"
@@ -298,38 +298,42 @@ def main():
             if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
                 raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
 
-            for rec in recs:
-                rec.run_dir = run_dir
-                chunk_records.append(rec)
-                all_records.append(rec)
+        for rec in recs:
+            rec.run_dir = run_dir
+            chunk_records.append(rec)
+            all_records.append(rec)
 
-                # Save full results immediately
-                writer.writerow(rec.to_dict())
-                f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
-                f_json.flush()
-                os.fsync(f_json.fileno())
+            # Save full results
+            writer.writerow(rec.to_dict())
+            f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
+            f_json.flush()
+            os.fsync(f_json.fileno())
 
-                # Save critical records immediately
-                if critical_filter.is_critical(rec.to_dict()):
-                    critical_filter.add_record(rec.to_dict())
-                    enriched_rec = critical_filter.critical_records[-1]
-                    enriched_rec["run_dir"] = rec.run_dir
+            # Save critical records
+        if critical_filter.is_critical(rec):
+            # Store the Record object itself
+            critical_filter.add_record(rec)
 
-                    critical_analysis = enriched_rec.get("critical_analysis", {})
-                    analysis_clean = critical_analysis.get("analysis_clean", {})
-                    analysis_mutated = critical_analysis.get("analysis_mutated", {})
+            enriched_rec: Record = critical_filter.critical_records[-1]
+            enriched_rec.run_dir = rec.run_dir  # update fields directly
 
-                    row = {
-                        **enriched_rec,
-                        "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
-                        "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
-                        "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
-                    }
+            # Convert to dict only when writing
+            enriched_dict = enriched_rec.to_dict()
+            critical_analysis = enriched_dict.get("critical_analysis", {})
+            analysis_clean = critical_analysis.get("analysis_clean", {})
+            analysis_mutated = critical_analysis.get("analysis_mutated", {})
 
-                    crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
-                    crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + "\n")
-                    crit_json.flush()
-                    os.fsync(crit_json.fileno())
+            row = {
+                **enriched_dict,
+                "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
+                "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
+                "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
+            }
+
+            crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
+            crit_json.write(json.dumps(enriched_dict, ensure_ascii=False, indent=2) + "\n")
+            crit_json.flush()
+            os.fsync(crit_json.fileno())
 
     print(f"\n{BOLD}{CYAN}=== SUMMARY ==={RESET}")
     print(json.dumps(aggregator.generate_summary(), indent=2))

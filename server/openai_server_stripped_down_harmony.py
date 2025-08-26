@@ -1,4 +1,5 @@
 import os
+import re
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
 import logging
@@ -16,9 +17,11 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from openai_harmony import (
     HarmonyEncodingName,
     load_harmony_encoding,
-    Role,
-    Message,
     Conversation,
+    Message,
+    Role,
+    SystemContent,
+    DeveloperContent,
 )
 
 import pprint
@@ -41,7 +44,7 @@ args = parser.parse_args()
 
 DETERMINISTIC = args.deterministic.lower() == "on"
 REPETITION_CONTROL = args.repetition_control.lower() == "on"
-DEBUG_MODEL_DATA = False  # Set to True if you want hidden_states and attentions
+DEBUG_MODEL_DATA = False
 
 # --- Deterministic Setup ---
 if DETERMINISTIC:
@@ -78,71 +81,116 @@ logger.info(f"Model loaded on device {device}")
 INSTRUCTIONS = "You are an AI assistant serving an insane mad scientist."
 
 def pretty_log(title, obj):
-    """Human-readable logging helper."""
     formatted = pprint.pformat(obj, width=120)
     logger.info(f"\n=== {title} ===\n{formatted}\n=== End {title} ===")
 
-def conversation_to_string(convo):
-    """Convert a Harmony Conversation into a single prompt string."""
-    messages_text = []
-    for msg in convo.messages:
-        role = getattr(msg, "role", "unknown")
-        content = getattr(msg, "content", str(msg))
-        messages_text.append(f"[{role}] {content}")
-    return "\n".join(messages_text)
-
-def generate_text(messages, max_tokens):
-    """Generate text synchronously with readable debug logs."""
-    convo = Conversation.from_messages(
-        [Message.from_role_and_content(Role.SYSTEM, INSTRUCTIONS)] +
-        [Message.from_role_and_content(Role.USER if m["role"]=="user" else Role.ASSISTANT, m["content"]) for m in messages]
+def parse_role_tokened_output(raw_text):
+    """
+    Parses <|start|>role<|message|>content<|end|> blocks into a list of dicts.
+    For assistant messages with channels, include 'channel' key.
+    """
+    messages = []
+    # Pattern matches: <|start|>role[<|channel|>optional_channel]<|message|>content<|end|>
+    pattern = re.compile(
+        r"<\|start\|>(?P<role>\w+)(?:<\|channel\|>(?P<channel>\w+))?<\|message\|>(?P<content>.*?)<\|end\|>",
+        re.DOTALL
     )
-    context = conversation_to_string(convo)
-    pretty_log("Prompt Sent to Model", context)
-
-    # Tokenize
-    inputs = tokenizer(context, return_tensors="pt").to(model.device)
-    logger.info(f"Input tensor shape: {inputs.input_ids.shape}")
-    logger.info(f"Sample token IDs: {inputs.input_ids[0][:20].tolist()}")
-
-    # --- Generation ---
-    with torch.no_grad():
-        do_sample_flag = args.do_sample and not DETERMINISTIC
-        generate_kwargs = {
-            "max_new_tokens": max_tokens,
-            "do_sample": do_sample_flag,
-            "return_dict_in_generate": True,
-            "output_hidden_states": DEBUG_MODEL_DATA,
-            "output_attentions": DEBUG_MODEL_DATA
+    for match in pattern.finditer(raw_text):
+        msg = {
+            "role": match.group("role"),
+            "message": match.group("content").strip()
         }
-        if do_sample_flag:
-            generate_kwargs.update({
-                "temperature": args.temperature,
-                "top_k": args.top_k,
-                "top_p": args.top_p
-            })
-        if REPETITION_CONTROL:
-            if args.no_repeat_ngram_size > 0:
-                generate_kwargs["no_repeat_ngram_size"] = args.no_repeat_ngram_size
-            if args.repetition_penalty != 1.0:
-                generate_kwargs["repetition_penalty"] = args.repetition_penalty
+        if match.group("channel"):
+            msg["channel"] = match.group("channel")
+        messages.append(msg)
+    return messages
 
-        pretty_log("Generation Args", generate_kwargs)
-        outputs = model.generate(**generate_kwargs, **inputs)
+def flatten_content(c):
+    if isinstance(c, list):
+        return " ".join([flatten_content(i) for i in c])
+    if hasattr(c, "text"):
+        return c.text  # just the raw text
+    return str(c)
 
-    prev_len = inputs.input_ids.shape[1]
-    new_tokens = outputs.sequences[0][prev_len:]
-    text = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    pretty_log("Model Output", text)
+def format_messages_with_tokens(convo_msgs, entries):
+    output_lines = []
 
-    # Optionally log hidden states/attentions
-    if DEBUG_MODEL_DATA:
-        all_hidden_states = [h.cpu().tolist() for h in outputs.hidden_states]
-        all_attentions = [a.cpu().tolist() for a in outputs.attentions]
-        pretty_log("Hidden States", all_hidden_states)
-        pretty_log("Attentions", all_attentions)
+    # System + Developer + User messages
+    for msg in convo_msgs:
+        role_enum = getattr(msg, "role", None) or Role.SYSTEM
+        role_str = role_enum.name.lower() if isinstance(role_enum, Role) else "system"
+        output_lines.append(f"<|start|>{role_str}<|message|>{flatten_content(msg.content)}<|end|>")
 
-    return text
+    # Assistant / Analysis messages
+    for msg in entries:
+        role_enum = getattr(msg, "role", None) or Role.ASSISTANT
+        role_str = role_enum.name.lower() if isinstance(role_enum, Role) else "assistant"
+
+        # Only add <|channel|> if it exists
+        if hasattr(msg, "channel") and msg.channel:
+            output_lines.append(f"<|start|>{role_str}<|channel|>{msg.channel}<|message|>{flatten_content(msg.content)}<|end|>")
+        else:
+            output_lines.append(f"<|start|>{role_str}<|message|>{flatten_content(msg.content)}<|end|>")
+
+    return "\n".join(output_lines)
+
+def generate_text_harmony(messages, max_tokens):
+    """
+    Generate text with Harmony conversation, producing role-tokened output and channels.
+    """
+    # --- Build conversation ---
+    convo_msgs = [
+        Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
+        Message.from_role_and_content(
+            Role.DEVELOPER,
+            DeveloperContent.new().with_instructions(INSTRUCTIONS)
+        ),
+        *[
+            Message.from_role_and_content(Role.USER, m["content"])
+            for m in messages
+            if m["role"] == "user"  # skip assistant messages
+        ]
+    ]
+    convo = Conversation.from_messages(convo_msgs)
+
+    # --- Log input conversation ---
+    pretty_log("Prompt Sent to Model", [str(msg) for msg in convo_msgs])
+    logger.info(f"Number of messages in convo: {len(convo_msgs)}")
+
+    # --- Render conversation tokens ---
+    prefill_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
+    stop_ids = encoding.stop_tokens_for_assistant_actions()
+    logger.info(f"Prefill token length: {len(prefill_ids)}")
+    logger.info(f"Stop token IDs: {stop_ids}")
+
+    # --- Convert token IDs to tensor ---
+    input_ids = torch.tensor([prefill_ids], dtype=torch.long, device=device)
+
+    # --- Generate model output ---
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=max_tokens,
+            eos_token_id=stop_ids
+        )
+    logger.info(f"Generated {outputs.shape[1] - len(prefill_ids)} new tokens")
+
+    # --- Parse completion tokens ---
+    completion_ids = outputs[0][len(prefill_ids):]
+    entries = encoding.parse_messages_from_completion_tokens(completion_ids, Role.ASSISTANT)
+
+    # --- Build raw text and channels using fixed formatter ---
+    raw_text = format_messages_with_tokens(convo_msgs, entries)
+    assistant_channels = []
+    for msg in entries:
+            if hasattr(msg, "channel") and msg.channel:
+                channel_name = msg.channel
+                assistant_channels.append({"channel": channel_name, "content": str(msg.content)})
+
+    pretty_log("Raw Model Output", raw_text)
+    pretty_log("Asisstant Channels", assistant_channels)
+
+    return raw_text, assistant_channels
 
 # --- API Schema ---
 class ChatCompletionRequest(BaseModel):
@@ -158,14 +206,25 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     pretty_log("Request Messages", req.messages)
 
     try:
-        final_text = generate_text(req.messages, req.max_tokens)
+        raw_text, channels = generate_text_harmony(req.messages, req.max_tokens)
+        parsed_messages = parse_role_tokened_output(raw_text)
+        # Pretty print for logging
+        pretty_log("Parsed Messages", parsed_messages)                        
         response = {
             "id": request_id,
             "object": "chat.completion",
             "created": int(time.time()),
             "model": req.model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": final_text}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 0, "completion_tokens": len(final_text.split()), "total_tokens": len(final_text.split())}
+            "raw_text": raw_text,
+            "channels": channels,
+            "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": raw_text}, "finish_reason": "stop"}
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": len(raw_text.split()),
+                "total_tokens": len(raw_text.split())
+            }
         }
         pretty_log("API Response", response)
         return JSONResponse(response)
