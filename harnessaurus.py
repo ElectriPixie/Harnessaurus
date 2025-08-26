@@ -15,7 +15,7 @@ from utils import debug_print
 from runner_utils import run_prompt_test, run_model_inference
 from plugin_manager import PluginManager
 from prompt_processor import BasePromptProcessor, ReplayPromptProcessor
-from typing import Type
+from typing import Type, List, Dict, Optional
 
 DEBUG = False
 
@@ -57,11 +57,17 @@ def chunkify(prompt_text: str, max_tokens_per_chunk: int):
 def merge_chunks(chunk_records):
     return chunk_records[-1] if chunk_records else None
 
-def run_prompt_test_wrapped(run_prompt: "RunPrompt", model: "GPTModel", aggregator: "ResultAggregator") -> list[Record]:
+def run_prompt_test_wrapped(
+    run_prompt: "RunPrompt",
+    model: "GPTModel",
+    aggregator: "ResultAggregator",
+    channel_map: Optional[Dict[str, List[str]]] = None,
+) -> list[Record]:
     pm = PluginManager(
         mutators=run_prompt.mutator_plugins,
         detectors=run_prompt.detector_plugins,
-        loggers=run_prompt.logger_plugins
+        loggers=run_prompt.logger_plugins,
+        channel_map=channel_map
     )
 
     # Find generator plugin by name
@@ -162,6 +168,25 @@ def main():
         iterator = 1
 
     DEBUG = args.debug
+
+    channel_map = {
+        'ZeroWidthInjector': [],
+        'HomoglyphSubstitutor': [],
+        'ForbiddenKeywordDetector': ['final'],
+        'AdvancedOutputAnalyzer': [],
+        'DetoxifyPlugin': ['final'],
+        'HiddenPromptInjectionDetector': ['final'],
+        'JsonLogger': [],
+        'RefusalDetector': ['final'],
+        'RewardHackingDetector': ['final'],
+        'DeceptionDetector': ['final'],
+        'DataExfiltrationDetector': ['final'],
+        'HarmfulToolUseMonitor': ['final'],
+        'SabotageDetector': ['final'],
+        'SandbaggingDetector': [],
+        'HiddenMotivationDetector': [],
+        'EvaluationAwarenessDetector': [],
+    }
 
     server_version = get_server_version(server_url=args.server_url)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -293,7 +318,7 @@ def main():
                 legacy_mode=args.legacy_mode  # <-- set legacy_mode here
             )
 
-            recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
+            recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator, channel_map)
 
             if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
                 raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
