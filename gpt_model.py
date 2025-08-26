@@ -7,6 +7,7 @@ from utils import (
     debug_print,
     unpack_textcontent
 )
+import re
 
 DEBUG = True
 HARMONY_TOKEN_IDS = {200000, 200001, 200002, 200003, 200004, 200005, 200006, 200007}
@@ -139,6 +140,11 @@ class GPTModelModern:
         self.strip_harmony_tokens = strip_harmony_tokens
         debug_print(DEBUG, f"[Modern __init__] server_url={server_url}, model_name={model_name}, "
                           f"max_context_chars={max_context_chars}, strip_harmony_tokens={strip_harmony_tokens}")
+    
+    def unwrap_textcontent_regex(self, text: str) -> str:
+            # Matches TextContent(text='…') or TextContent(text="…") and captures the inner content
+            dirty = re.sub(r"TextContent\(text=(?:'|\")(.*?)(?:'|\")\)", r"\1", text)
+            return re.sub(r"^\[|\]$", "", dirty)
 
     def _call_server(self, prompt_text: str, max_tokens=256, multi_chunk: bool = False) -> dict:
         debug_print(DEBUG, f"[Modern _call_server] Prompt length: {len(prompt_text)}, max_tokens={max_tokens}")
@@ -176,7 +182,8 @@ class GPTModelModern:
         debug_print(DEBUG, f"[Modern infer_single_pass] Running single-pass for prompt id: {id(prompt)}")
         data = self._call_server(prompt_text=prompt.output_text, max_tokens=max_tokens)
         choice = data['choices'][0]['message']
-        channels = {ch['channel']: ch.get('content', '') for ch in data.get('channels', [])}
+        channels = {ch['channel']: self.unwrap_textcontent_regex(str(ch.get('content', '')))
+                for ch in data.get('channels', [])}
         raw_text = choice.get("content", "")
         debug_print(DEBUG, f"[Modern infer_single_pass] Output length: {len(raw_text)}")
         debug_print(DEBUG, f"[Modern infer_single_pass] Channels: {channels}")

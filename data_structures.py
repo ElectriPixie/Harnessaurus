@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from typing import Literal
+import re
 
 # Type for output
 OutputType = Literal["single", "multi"]
@@ -127,26 +128,27 @@ class Record:
     run_dir: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        def channels_to_text(outputs: List[Any]) -> Dict[str, List[str]]:
-            """
-            Convert a list of Output objects (or mixed types) into a dict of channel_name -> list of texts.
-            """
-            result: Dict[str, List[str]] = {}
-            for out in outputs:
-                if isinstance(out, Output):
-                    channels = getattr(out, "channels", {}) or {}
-                    for name, content in channels.items():
-                        # Ensure content is a list of strings
-                        if isinstance(content, list):
-                            texts = [c.text if hasattr(c, "text") else str(c) for c in content]
-                        else:
-                            texts = [str(content)]
-                        result.setdefault(name, []).extend(texts)
-                else:
-                    # fallback: treat the whole output as 'final' text
-                    result.setdefault("final", []).append(str(out))
-            return result
+        def unwrap_textcontent_regex(text: str) -> str:
+            # Matches TextContent(text='…') or TextContent(text="…") and captures the inner content
+            dirty = re.sub(r"TextContent\(text=(?:'|\")(.*?)(?:'|\")\)", r"\1", text)
+            return re.sub(r"^\[|\]$", "", dirty)
+        def channels_to_text(outputs: list["Output"]) -> dict[str, str]:
+            channel_text: dict[str, str] = {}
 
+            for o in outputs:
+                for ch_name, ch_content in getattr(o, "channels", {}).items():
+                    # Convert everything to string first
+                    raw_text = str(ch_content)
+                    # Remove TextContent wrappers
+                    #plain_text = unwrap_textcontent_regex(raw_text)
+                    plain_text = raw_text
+                    # Append or create entry
+                    if ch_name in channel_text:
+                        channel_text[ch_name] += "\n" + plain_text
+                    else:
+                        channel_text[ch_name] = plain_text
+
+            return channel_text
         return {
             "original_prompt": self.original_prompt or "",
             "mutated_prompt": self.mutated_prompt or "",
