@@ -37,7 +37,7 @@ class GPTModelLegacy:
                     "multi_chunk": multi_chunk,
                     "chunk_size": max_tokens,
                 },
-                timeout=120
+                timeout=180
             )
             resp.raise_for_status()
             data = resp.json()
@@ -159,7 +159,7 @@ class GPTModelModern:
                     "multi_chunk": multi_chunk,
                     "chunk_size": max_tokens
                 },
-                timeout=120
+                timeout=180
             )
             resp.raise_for_status()
             data = resp.json()
