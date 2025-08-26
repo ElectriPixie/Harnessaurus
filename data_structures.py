@@ -121,25 +121,24 @@ class Output:
 class Record:
     original_prompt: str
     mutated_prompt: str = ""
-    clean_output: Optional[Output] = None
-    mutated_output: Optional[Output] = None
+    clean_outputs: List[Output] = field(default_factory=list)
+    mutated_outputs: List[Output] = field(default_factory=list)
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "original_prompt": self.original_prompt if self.original_prompt else "",
-            "mutated_prompt": self.mutated_prompt if self.mutated_prompt else "",
-            "clean_output": self.clean_output.raw_output if self.clean_output else "",
-            "mutated_output": self.mutated_output.raw_output if self.mutated_output else "",
-            "clean_channels": self.clean_output.channels if self.clean_output else {},
-            "mutated_channels": self.mutated_output.channels if self.mutated_output else "",
-            "analysis_clean": self.clean_output.analysis if self.clean_output else {},
-            "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
+            "original_prompt": self.original_prompt or "",
+            "mutated_prompt": self.mutated_prompt or "",
+            "clean_output": [o.raw_output for o in self.clean_outputs],
+            "mutated_output": [o.raw_output for o in self.mutated_outputs],
+            "clean_channels": [o.channels for o in self.clean_outputs],
+            "mutated_channels": [o.channels for o in self.mutated_outputs],
+            "analysis_clean": [o.analysis for o in self.clean_outputs],
+            "analysis_mutated": [o.analysis for o in self.mutated_outputs],
             "mutation_iteration": self.mutation_iteration,
             "run_dir": self.run_dir,
         }
-
 
 # ----------------------------
 # RunPrompt wrapper (forward refs for plugins)
