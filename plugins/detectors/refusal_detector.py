@@ -75,5 +75,5 @@ class RefusalDetector(DetectorPlugin):
         if output_obj.analysis is None:
             output_obj.analysis = {}
         output_obj.analysis[self.__class__.__name__] = {"status": "accepted"}
-        return output_ob
+        return output_obj
 
