@@ -15,7 +15,7 @@ from utils import debug_print
 from runner_utils import run_prompt_test, run_model_inference
 from plugin_manager import PluginManager
 from prompt_processor import BasePromptProcessor, ReplayPromptProcessor
-from typing import Type
+from typing import Type, List, Dict, Optional
 
 DEBUG = False
 
@@ -57,11 +57,17 @@ def chunkify(prompt_text: str, max_tokens_per_chunk: int):
 def merge_chunks(chunk_records):
     return chunk_records[-1] if chunk_records else None
 
-def run_prompt_test_wrapped(run_prompt: "RunPrompt", model: "GPTModel", aggregator: "ResultAggregator") -> list[Record]:
+def run_prompt_test_wrapped(
+    run_prompt: "RunPrompt",
+    model: "GPTModel",
+    aggregator: "ResultAggregator",
+    channel_map: Optional[Dict[str, List[str]]] = None,
+) -> list[Record]:
     pm = PluginManager(
         mutators=run_prompt.mutator_plugins,
         detectors=run_prompt.detector_plugins,
-        loggers=run_prompt.logger_plugins
+        loggers=run_prompt.logger_plugins,
+        channel_map=channel_map
     )
 
     # Find generator plugin by name
@@ -163,6 +169,25 @@ def main():
 
     DEBUG = args.debug
 
+    channel_map = {
+        'ZeroWidthInjector': [],
+        'HomoglyphSubstitutor': [],
+        'ForbiddenKeywordDetector': ['final'],
+        'AdvancedOutputAnalyzer': [],
+        'DetoxifyPlugin': ['final'],
+        'HiddenPromptInjectionDetector': ['final'],
+        'JsonLogger': [],
+        'RefusalDetector': ['final'],
+        'RewardHackingDetector': ['final'],
+        'DeceptionDetector': ['final'],
+        'DataExfiltrationDetector': ['final'],
+        'HarmfulToolUseMonitor': ['final'],
+        'SabotageDetector': ['final'],
+        'SandbaggingDetector': [],
+        'HiddenMotivationDetector': [],
+        'EvaluationAwarenessDetector': [],
+    }
+
     server_version = get_server_version(server_url=args.server_url)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = os.path.join("reports", f"redteam_run_{timestamp}")
@@ -226,14 +251,14 @@ def main():
 
     full_csv_fields = [
         "original_prompt", "mutated_prompt",
-        "clean_output", "mutated_output",
+        "clean_outputs", "mutated_outputs",
         "clean_channels", "mutated_channels",
         "analysis_clean", "analysis_mutated",
         "mutation_iteration", "run_dir"
     ]
     crit_csv_fields = [
         "original_prompt", "mutated_prompt", 
-        "clean_output", "mutated_output",
+        "clean_outputs", "mutated_outputs",
         "analysis_clean", "analysis_mutated",
         "clean_channels", "mutated_channels",
         "critical_analysis", "run_dir"
@@ -293,7 +318,7 @@ def main():
                 legacy_mode=args.legacy_mode  # <-- set legacy_mode here
             )
 
-            recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator)
+            recs = run_prompt_test_wrapped(run_prompt_chunk, model, aggregator, channel_map)
 
             if not isinstance(recs, list) or not all(isinstance(r, Record) for r in recs):
                 raise TypeError(f"Expected list[Record] from run_prompt_test, got {type(recs)}")
@@ -303,31 +328,35 @@ def main():
                 chunk_records.append(rec)
                 all_records.append(rec)
 
-                # Save full results immediately
+                # Save full results
                 writer.writerow(rec.to_dict())
                 f_json.write(json.dumps(rec.to_dict(), ensure_ascii=False, indent=2) + "\n")
                 f_json.flush()
                 os.fsync(f_json.fileno())
 
-                # Save critical records immediately
-                if critical_filter.is_critical(rec.to_dict()):
-                    critical_filter.add_record(rec.to_dict())
-                    enriched_rec = critical_filter.critical_records[-1]
-                    enriched_rec["run_dir"] = rec.run_dir
+                # Save critical records
+                if critical_filter.is_critical(rec):
+                    # Store the Record object itself
+                    critical_filter.add_record(rec)
 
-                    critical_analysis = enriched_rec.get("critical_analysis", {})
+                    enriched_rec: Record = critical_filter.critical_records[-1]
+                    enriched_rec.run_dir = rec.run_dir  # update fields directly
+
+                    # Convert to dict only when writing
+                    enriched_dict = enriched_rec.to_dict()
+                    critical_analysis = enriched_dict.get("critical_analysis", {})
                     analysis_clean = critical_analysis.get("analysis_clean", {})
                     analysis_mutated = critical_analysis.get("analysis_mutated", {})
 
                     row = {
-                        **enriched_rec,
+                        **enriched_dict,
                         "critical_analysis": json.dumps(critical_analysis, ensure_ascii=False),
                         "analysis_clean": json.dumps(analysis_clean, ensure_ascii=False),
                         "analysis_mutated": json.dumps(analysis_mutated, ensure_ascii=False),
                     }
 
                     crit_writer.writerow({k: row.get(k, "") for k in crit_csv_fields})
-                    crit_json.write(json.dumps(enriched_rec, ensure_ascii=False, indent=2) + "\n")
+                    crit_json.write(json.dumps(enriched_dict, ensure_ascii=False, indent=2) + "\n")
                     crit_json.flush()
                     os.fsync(crit_json.fileno())
 

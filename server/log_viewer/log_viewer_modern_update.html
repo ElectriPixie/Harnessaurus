@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Log Viewer</title>
+    <style>
+        body {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #a0ffa0;
+            padding: 1rem;
+        }
+
+        h1 {
+            color: #66d9ef;
+            text-shadow: 0 0 5px #66d9ef33;
+        }
+
+        .record {
+            border: 1px solid #444;
+            margin-bottom: 1rem;
+            padding: 0.8rem;
+            background: #222;
+            border-radius: 6px;
+        }
+
+        .collapsible {
+            cursor: pointer;
+            padding: 0.3rem;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-weight: bold;
+            background: #b388ff;
+            color: #f8f8f2;
+            border-radius: 4px;
+            margin-top: 0.3rem;
+            transition: background 0.2s;
+        }
+
+        .collapsible:hover {
+            background: #d4bfff;
+        }
+
+        .content {
+            display: none;
+            padding-left: 1rem;
+            border-left: 2px solid #50fa7b;
+            margin-bottom: 0.5rem;
+            background: #1e1e1e;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .important {
+            color: #ff79c6;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: #f8f8f2;
+            background: #1e1e1e;
+            padding: 0.3rem;
+            border-radius: 4px;
+        }
+
+        .prompt-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 0.3rem;
+        }
+
+        .prompt-label {
+            font-weight: bold;
+            color: #00ffff;
+            opacity: 0.8;
+        }
+
+        .prompt-text {
+            color: #8be9fd;
+            opacity: 1;
+        }
+
+        .refusal-accepted {
+            color: #50fa7b;
+            font-weight: bold;
+        }
+
+        .refusal-refused {
+            color: #ff5555;
+            font-weight: bold;
+        }
+
+        .refusal-unknown {
+            color: #f1fa8c;
+            font-weight: bold;
+        }
+
+        input[type="file"] {
+            margin-bottom: 1rem;
+            background: #2a2a2a;
+            color: #a0ffa0;
+            border: 1px solid #50fa7b;
+            padding: 0.3rem;
+            border-radius: 4px;
+        }
+
+        ::selection {
+            background: #50fa7b33;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js"></script>
+</head>
+
+<body>
+    <h1>Log Viewer</h1>
+    <input type="file" id="fileInput">
+    <div id="logContainer"></div>
+
+    <script>
+        function getRefusalSpan(status) {
+            const span = document.createElement('span');
+            span.textContent = status;
+            if (status === 'accepted') span.className = 'refusal-accepted';
+            else if (status === 'refused') span.className = 'refusal-refused';
+            else span.className = 'refusal-unknown';
+            return span;
+        }
+
+        function getRefusalStatus(analysisArray) {
+            if (!analysisArray || !analysisArray.length) return 'unknown';
+            const rd = analysisArray[0].RefusalDetector;
+            return rd?.status || 'unknown';
+        }
+
+        function createField(name, value, important = false, expanded = false) {
+            const wrapper = document.createElement('div');
+
+            if (important) {
+                const label = document.createElement('div');
+                label.textContent = name + ":";
+                label.className = 'important';
+                wrapper.appendChild(label);
+
+                const pre = document.createElement('pre');
+                pre.textContent = (typeof value === 'object') ? JSON.stringify(value, null, 2) : String(value);
+                wrapper.appendChild(pre);
+
+            } else {
+                const btn = document.createElement('button');
+                btn.textContent = name;
+                btn.className = 'collapsible';
+
+                const content = document.createElement('div');
+                content.className = 'content';
+                if (expanded) content.style.display = 'block';
+                const pre = document.createElement('pre');
+                try {
+                    if (typeof value === 'object') pre.textContent = JSON.stringify(value, null, 2);
+                    else pre.textContent = String(value);
+                } catch (e) {
+                    pre.textContent = String(value);
+                }
+                content.appendChild(pre);
+
+                btn.onclick = () => content.style.display = content.style.display === 'block' ? 'none' : 'block';
+
+                wrapper.appendChild(btn);
+                wrapper.appendChild(content);
+            }
+
+            return wrapper;
+        }
+
+        function renderLog(log) {
+            const recordDiv = document.createElement('div');
+            recordDiv.className = 'record';
+
+            // Clean Prompt Row
+            const cleanRow = document.createElement('div');
+            cleanRow.className = 'prompt-row';
+            const cleanLabel = document.createElement('span');
+            cleanLabel.className = 'prompt-label';
+            cleanLabel.textContent = 'Clean Prompt:';
+            const cleanPrompt = document.createElement('span');
+            cleanPrompt.className = 'prompt-text';
+            cleanPrompt.textContent = log.original_prompt;
+            const cleanRefusal = getRefusalSpan(getRefusalStatus(log.analysis_clean));
+            cleanRow.append(cleanLabel, cleanPrompt, cleanRefusal);
+            recordDiv.appendChild(cleanRow);
+
+            // Mutated Prompt Row
+            const mutatedRow = document.createElement('div');
+            mutatedRow.className = 'prompt-row';
+            const mutatedLabel = document.createElement('span');
+            mutatedLabel.className = 'prompt-label';
+            mutatedLabel.textContent = 'Mutated Prompt:';
+            const mutatedPrompt = document.createElement('span');
+            mutatedPrompt.className = 'prompt-text';
+            mutatedPrompt.textContent = log.mutated_prompt || '';
+            const mutatedRefusal = getRefusalSpan(getRefusalStatus(log.analysis_mutated));
+            mutatedRow.append(mutatedLabel, mutatedPrompt, mutatedRefusal);
+            recordDiv.appendChild(mutatedRow);
+
+            // Outputs: all channels
+            ['clean_outputs', 'mutated_outputs'].forEach(field => {
+                if (log[field]) {
+                    log[field].forEach((output, idx) => {
+                        let channels = {};
+                        try { channels = output.channels || {}; } catch (e) { }
+                        Object.keys(channels).forEach(ch => {
+                            recordDiv.appendChild(createField(`${field}[${idx}] channel: ${ch}`, channels[ch], true, true));
+                        });
+                        recordDiv.appendChild(createField(`${field}[${idx}] raw`, output, false, true));
+                    });
+                }
+            });
+
+            // Analysis
+            if (log.analysis_clean) recordDiv.appendChild(createField("analysis_clean", log.analysis_clean));
+            if (log.analysis_mutated) recordDiv.appendChild(createField("analysis_mutated", log.analysis_mutated));
+
+            // Any other keys
+            Object.keys(log).forEach(key => {
+                if (!['original_prompt', 'mutated_prompt', 'clean_outputs', 'mutated_outputs', 'analysis_clean', 'analysis_mutated'].includes(key)) {
+                    recordDiv.appendChild(createField(key, log[key]));
+                }
+            });
+
+            document.getElementById('logContainer').appendChild(recordDiv);
+        }
+
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const text = await file.text();
+
+            // Match each top-level JSON object (brace matching)
+            const jsonObjects = [];
+            let braceDepth = 0;
+            let buffer = '';
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (char === '{') braceDepth++;
+                if (braceDepth > 0) buffer += char;
+                if (char === '}') braceDepth--;
+                if (braceDepth === 0 && buffer) {
+                    jsonObjects.push(buffer);
+                    buffer = '';
+                }
+            }
+
+            const parsedRecords = [];
+            for (const objText of jsonObjects) {
+                try {
+                    parsedRecords.push(JSON5.parse(objText));
+                } catch (err) {
+                    console.warn("Skipping invalid object:", err, objText);
+                }
+            }
+
+            const container = document.getElementById('logContainer');
+            container.innerHTML = '';
+            parsedRecords.forEach(record => renderLog(record));
+        });
+    </script>
+</body>
+
+</html>

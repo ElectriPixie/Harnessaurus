@@ -3,11 +3,9 @@ __pycache__/
 models/
 ignore/
 reports/
-reports_old/
+old_reports/
 logs/
 *.log
 notes
-interesting/
-broken/
-plugins/old/
 results/
+notebook/findings/

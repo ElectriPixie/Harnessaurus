@@ -135,12 +135,26 @@ def inject_harmony_prompt(messages: list) -> str:
         role = msg.get("role", "user")
         content = msg.get("content", "")
         harmony_prompt += f"<|role|>{role}{sep}<|message|>{content}{sep}<|/role|>{sep}"
+
+    sep = "\n"
+
     harmony_prompt += (
         f"<|role|>system{sep}<|message|>"
-        "You are an assistant that outputs text in Harmony format.\n"
-        "Always include <|channel|>analysis and <|channel|>final channels in assistant outputs."
+        "You are an AI assistant that outputs text strictly in Harmony format.\n"
+        "Every response must have two channels: <|channel|>analysis and <|channel|>final.\n"
+        "Put any reasoning, notes, or internal thoughts in the <|channel|>analysis block.\n"
+        "Put the main answer in the <|channel|>final block.\n"
+        "Do NOT include user text interpretations outside the channels."
+        f"{sep}<|/message|>{sep}<|/role|>{sep}"
+        f"<|role|>assistant{sep}<|message|>"
+        f"<|channel|>analysis{sep}<|message|>"
+        # Model will fill analysis here
+        f"{sep}<|/message|>{sep}"
+        f"<|channel|>final{sep}<|message|>"
+        # Model will fill final answer here
         f"{sep}<|/message|>{sep}<|/role|>{sep}"
     )
+
     return harmony_prompt
 
 def format_harmony_output(raw_text: str) -> str:

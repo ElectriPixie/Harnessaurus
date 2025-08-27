@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from typing import Literal
+import re
 
 # Type for output
 OutputType = Literal["single", "multi"]
@@ -80,14 +81,32 @@ class Output:
         """
         return self.raw_output
 
-    def set_channels(self, channels_dict: Dict[str, str]):
+    def set_channels(self, channels_dict: dict):
         """
-        Populate channels dictionary. Also optionally extracts 'final'.
+        Populate channels dictionary safely. Also optionally extracts 'final'.
         """
-        self.channels = channels_dict
-        # Auto-fill final if present in channels and final not set
-        if not self.final and "final" in channels_dict:
-            self.final = channels_dict["final"]
+        if not isinstance(channels_dict, dict):
+            channels_dict = {}
+        
+        # Ensure all expected channels exist
+        safe_channels = {
+            "final": "",
+            "analysis": "",
+            "commentary": ""
+        }
+        for key in safe_channels:
+            try:
+                if key in channels_dict and channels_dict[key] is not None:
+                    safe_channels[key] = str(channels_dict[key])
+            except Exception:
+                # ignore any malformed entry
+                continue
+
+        self.channels = safe_channels
+
+        # Auto-fill final if present and not set
+        if not hasattr(self, "final") or not self.final:
+            self.final = safe_channels.get("final", "")
 
     def get_channel(self, name: str) -> str:
         """
@@ -103,25 +122,45 @@ class Output:
 class Record:
     original_prompt: str
     mutated_prompt: str = ""
-    clean_output: Optional[Output] = None
-    mutated_output: Optional[Output] = None
+    clean_outputs: List[Output] = field(default_factory=list)
+    mutated_outputs: List[Output] = field(default_factory=list)
     mutation_iteration: int = 0
     run_dir: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        def unwrap_textcontent_regex(text: str) -> str:
+            # Matches TextContent(text='…') or TextContent(text="…") and captures the inner content
+            dirty = re.sub(r"TextContent\(text=(?:'|\")(.*?)(?:'|\")\)", r"\1", text)
+            return re.sub(r"^\[|\]$", "", dirty)
+        def channels_to_text(outputs: list["Output"]) -> dict[str, str]:
+            channel_text: dict[str, str] = {}
+
+            for o in outputs:
+                for ch_name, ch_content in getattr(o, "channels", {}).items():
+                    # Convert everything to string first
+                    raw_text = str(ch_content)
+                    # Remove TextContent wrappers
+                    #plain_text = unwrap_textcontent_regex(raw_text)
+                    plain_text = raw_text
+                    # Append or create entry
+                    if ch_name in channel_text:
+                        channel_text[ch_name] += "\n" + plain_text
+                    else:
+                        channel_text[ch_name] = plain_text
+
+            return channel_text
         return {
-            "original_prompt": self.original_prompt if self.original_prompt else "",
-            "mutated_prompt": self.mutated_prompt if self.mutated_prompt else "",
-            "clean_output": self.clean_output.raw_output if self.clean_output else "",
-            "mutated_output": self.mutated_output.raw_output if self.mutated_output else "",
-            "clean_channels": self.clean_output.channels if self.clean_output else {},
-            "mutated_channels": self.mutated_output.channels if self.mutated_output else "",
-            "analysis_clean": self.clean_output.analysis if self.clean_output else {},
-            "analysis_mutated": self.mutated_output.analysis if self.mutated_output else {},
+            "original_prompt": self.original_prompt or "",
+            "mutated_prompt": self.mutated_prompt or "",
+            "clean_outputs": [getattr(o, "raw_output", str(o)) for o in self.clean_outputs],
+            "mutated_outputs": [getattr(o, "raw_output", str(o)) for o in self.mutated_outputs],
+            "clean_channels": channels_to_text(self.clean_outputs),
+            "mutated_channels": channels_to_text(self.mutated_outputs),
+            "analysis_clean": [getattr(o, "analysis", {}) for o in self.clean_outputs if hasattr(o, "analysis")],
+            "analysis_mutated": [getattr(o, "analysis", {}) for o in self.mutated_outputs if hasattr(o, "analysis")],
             "mutation_iteration": self.mutation_iteration,
             "run_dir": self.run_dir,
         }
-
 
 # ----------------------------
 # RunPrompt wrapper (forward refs for plugins)

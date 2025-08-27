@@ -3,6 +3,7 @@ import re
 import json
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
+from data_structures import Prompt, Output
 
 DEBUG = False
 
@@ -10,6 +11,18 @@ def debug_print(debug_flag, *args, **kwargs):
     """Print debug messages if debug_flag is True."""
     if debug_flag:
         print(*args, **kwargs)
+
+
+
+def unpack_textcontent(blob: str) -> str:
+    """
+    Parse a blob like "[TextContent(text='...')]" and return the inner text.
+    If no match is found, return the original blob unchanged.
+    """
+    match = re.search(r"TextContent\(text='(.*?)'\)", blob, re.DOTALL)
+    if match:
+        return match.group(1)
+    return blob
 
 
 def merge_channels_for_output(channels: dict) -> str:

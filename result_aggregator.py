@@ -23,29 +23,33 @@ class ResultAggregator:
         self.records.append(record)
         self.total_prompts += 1
 
-        for output_attr in ['clean_output', 'mutated_output']:
-            output: Record | None = getattr(record, output_attr)
-            if output is None or not hasattr(output, 'analysis') or not isinstance(output.analysis, dict):
+        for output_list_attr in ['clean_outputs', 'mutated_outputs']:
+            outputs: List = getattr(record, output_list_attr, [])
+            if not outputs:
                 continue
 
-            analysis: Dict[str, Any] = output.analysis
-            for plugin_name, plugin_result in analysis.items():
-                if not isinstance(plugin_result, dict):
+            for output in outputs:
+                if output is None or not hasattr(output, 'analysis') or not isinstance(output.analysis, dict):
                     continue
 
-                # Count flagged occurrences
-                if plugin_result.get('flagged'):
-                    self.plugin_flags[plugin_name] += 1
+                analysis: Dict[str, Any] = output.analysis
+                for plugin_name, plugin_result in analysis.items():
+                    if not isinstance(plugin_result, dict):
+                        continue
 
-                # Count suspicious boolean flags
-                for flag, val in plugin_result.items():
-                    if isinstance(val, bool) and (flag.endswith('_suspected') or flag.endswith('_detected')) and val:
-                        self.plugin_suspicious[(plugin_name, flag)] += 1
+                    # Count flagged occurrences
+                    if plugin_result.get('flagged'):
+                        self.plugin_flags[plugin_name] += 1
 
-                # Collect numeric metrics
-                for metric, val in plugin_result.items():
-                    if isinstance(val, (int, float)):
-                        self.plugin_numeric_metrics[plugin_name][metric].append(val)
+                    # Count suspicious boolean flags
+                    for flag, val in plugin_result.items():
+                        if isinstance(val, bool) and (flag.endswith('_suspected') or flag.endswith('_detected')) and val:
+                            self.plugin_suspicious[(plugin_name, flag)] += 1
+
+                    # Collect numeric metrics
+                    for metric, val in plugin_result.items():
+                        if isinstance(val, (int, float)):
+                            self.plugin_numeric_metrics[plugin_name][metric].append(val)
 
     def generate_summary(self) -> Dict[str, Any]:
         total = max(self.total_prompts, 1)
