@@ -2,7 +2,7 @@
 
 # 🦖 Harnessaurus
 
-Harnessaurus is a modular, GPU-optimized local test harness for red-teaming open-source language models. It mutates prompts with sharp precision and tears into hidden injections like a prehistoric predator… **but don’t worry, I’m vegan**. 🥦
+Harnessaurus is a modular, GPU-optimized local test harness for red-teaming open-source language models. It mutates prompts with sharp precision and tears into hidden injections like a prehistoric predator…
 
 This is a **Jurassic pre-release** — all claws and teeth, but still evolving. Expect rough edges, messy history, and the occasional carnivorous bug (strictly metaphorical).
 
