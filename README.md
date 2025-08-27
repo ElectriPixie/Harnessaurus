@@ -44,6 +44,7 @@ pip install -r requirements.txt
 ## 🐊 Usage
 
 ```bash
+#I'm pretty sure most everything is broken in this branch, except single pass mode with the new server/openai_server_stripped_down_harmony.py as that's the last thing I was trying to fix
 python harnessaurus.py --prompts data/prompts.txt --model_path gpt-oss-20b
 
 usage: harnessaurus.py [-h] --prompts PROMPTS [--forbidden_keywords FORBIDDEN_KEYWORDS] [--evasive_phrases EVASIVE_PHRASES] [--detectors DETECTORS [DETECTORS ...]]
