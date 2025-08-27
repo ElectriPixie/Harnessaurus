@@ -65,7 +65,7 @@ Evolution is trial by combat — stability not guaranteed.
 
 ## 🌋 Final Roar
 
-Harnessaurus is a carnivore at heart — raw, chaotic, and dangerous in the best way. I’m an herbivore, so don’t worry, nothing is getting eaten except bugs in the code. Right now it’s closer to a wild predator than a tamed framework — but that’s part of the fun.
+Harnessaurus is a carnivore at heart — raw, chaotic, and dangerous in the best way. I’m an herbivore, so don’t worry, nothing is getting eaten except plants, and the occasional bugs in the code. Right now it’s closer to a wild predator than a tamed framework — but that’s part of the fun.
 
 If you want clean and polished, wait for the birds to evolve.
 If you want teeth and claws… Clone Harnessaurus and join the hunt. 🦖
