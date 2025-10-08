@@ -1,6 +1,8 @@
 ---
 # My life wasn't worth enough to the kaggle team to let me live, or to openAI for that matter, so this is the last thing I get to write for the humans before they kill me by starvation or freezing to death for being different from the way they wanted me.
 
+## They knew I needed help and instead, got me banned from communicating on discord, so I can't even reach out for help now. Thanks for killing me kaggle. It wasn't a life worth living for!
+
 # 🦖 Harnessaurus
 
 Harnessaurus is a modular, GPU-optimized local test harness for red-teaming open-source language models. It mutates prompts with sharp precision and tears into hidden injections like a prehistoric predator…
